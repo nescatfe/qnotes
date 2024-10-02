@@ -14,6 +14,7 @@ struct NoteDetailView: View {
     @State private var animateContent = false
     @State private var contentChunks: [String] = []
     @State private var showingUnsavedChangesAlert = false
+    @State private var showingInfoAlert = false
     
     let onSave: (Note) -> Void
     
@@ -34,41 +35,17 @@ struct NoteDetailView: View {
                         .scaleEffect(1.5)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if isEditing {
-                    VStack(spacing: 0) {
-                        TextEditor(text: $editedContent)
-                            .font(.system(size: 16, weight: .regular, design: .monospaced))
-                            .padding()
-                            .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                            .transition(.opacity)
-                        
-                        bottomBar
+                    NoteEditView(authManager: AuthenticationManager(), mode: .edit, content: editedContent, existingNote: note) { updatedNote in
+                        if updatedNote.content != self.note.content {
+                            self.note = updatedNote
+                            self.editedContent = updatedNote.content
+                            self.onSave(updatedNote)
+                        }
+                        self.isEditing = false
+                        self.loadNoteContent()
                     }
                 } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Text(formatDate(note.timestamp))
-                                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-                                
-                                Spacer()
-                                
-                                Text("\(wordCount)w / \(note.content.count)c")
-                                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-                            }
-                            .padding(.horizontal)
-                            
-                            ForEach(contentChunks.indices, id: \.self) { index in
-                                Text(contentChunks[index])
-                                    .font(.system(size: 16, weight: .regular, design: .monospaced))
-                                    .padding(.horizontal)
-                                    .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                            }
-                        }
-                        .opacity(animateContent ? 1 : 0)
-                        .offset(y: animateContent ? 0 : 20)
-                    }
+                    noteContentView
                 }
             }
             .navigationBarTitle("", displayMode: .inline)
@@ -78,13 +55,8 @@ struct NoteDetailView: View {
                         .font(.system(size: 17, weight: .regular, design: .monospaced))
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack {
-                        if isEditing {
-                            cancelButton
-                        } else {
-                            copyButton
-                        }
-                        editButton
+                    if !isEditing {
+                        infoButton
                     }
                 }
             }
@@ -98,57 +70,91 @@ struct NoteDetailView: View {
             }
             
             if showCopiedNotification {
-                VStack {
-                    Spacer()
-                    Text("Copied")
-                        .font(.system(size: 16, weight: .medium, design: .monospaced))
-                        .padding()
-                        .background(Color.draculaGreen)
-                        .foregroundColor(.draculaBackground)
-                        .cornerRadius(10)
-                    Spacer()
-                }
-                .transition(.opacity)
-                .zIndex(1)
+                copiedNotificationView
             }
         }
         .onChange(of: note) { _, _ in
             loadNoteContent()
         }
         .alert(isPresented: $showingUnsavedChangesAlert) {
-            Alert(
-                title: Text("Unsaved Changes"),
-                message: Text("You have unsaved changes. Do you want to save them?"),
-                primaryButton: .default(Text("Save")) {
-                    saveNote()
-                    navigateBack()
-                },
-                secondaryButton: .destructive(Text("Discard")) {
-                    navigateBack()
-                }
-            )
+            unsavedChangesAlert
+        }
+        .alert(isPresented: $showingInfoAlert) {
+            infoAlert
         }
     }
     
-    private var bottomBar: some View {
-        HStack {
-            Text("\(editedContent.count) chars / \(wordCount) words")
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-            
-            Spacer()
-            
-            Button(action: {
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            }) {
-                Text("Hide Keyboard")
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+    private var noteContentView: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Text(formatDate(note.timestamp))
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+                    
+                    Spacer()
+                    
+                    Text("\(wordCount)w / \(note.content.count)c")
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+                }
+                .padding(.horizontal)
+                
+                ForEach(contentChunks.indices, id: \.self) { index in
+                    Text(contentChunks[index])
+                        .font(.system(size: 16, weight: .regular, design: .monospaced))
+                        .padding(.horizontal)
+                        .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+                }
+            }
+            .opacity(animateContent ? 1 : 0)
+            .offset(y: animateContent ? 0 : 20)
+        }
+        .onTapGesture(count: 2) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                isEditing = true
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color.clear)
+        .onLongPressGesture(minimumDuration: 0.5) {
+            copyNoteContent()
+        }
+    }
+    
+    private var copiedNotificationView: some View {
+        VStack {
+            Spacer()
+            Text("Copied")
+                .font(.system(size: 16, weight: .medium, design: .monospaced))
+                .padding()
+                .background(Color.draculaGreen)
+                .foregroundColor(.draculaBackground)
+                .cornerRadius(10)
+            Spacer()
+        }
+        .transition(.opacity)
+        .zIndex(1)
+    }
+    
+    private var unsavedChangesAlert: Alert {
+        Alert(
+            title: Text("Unsaved Changes"),
+            message: Text("You have unsaved changes. Do you want to save them?"),
+            primaryButton: .default(Text("Save")) {
+                saveNote()
+                navigateBack()
+            },
+            secondaryButton: .destructive(Text("Discard")) {
+                navigateBack()
+            }
+        )
+    }
+    
+    private var infoAlert: Alert {
+        Alert(
+            title: Text("Gesture Guide"),
+            message: Text("• Double tap to edit the note\n• Long press to copy the entire note"),
+            dismissButton: .default(Text("Got it!"))
+        )
     }
     
     private func loadNoteContent() {
@@ -169,39 +175,6 @@ struct NoteDetailView: View {
                 }
             }
         }
-    }
-    
-    private var editButton: some View {
-        Button(isEditing ? "Save" : "Edit") {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                if isEditing {
-                    saveNote()
-                } else {
-                    isEditing = true
-                }
-            }
-        }
-        .disabled(isEditing && isSaving)
-        .foregroundColor(colorScheme == .dark ? .draculaGreen : .blue)
-        .font(.system(size: 16, weight: .regular, design: .monospaced))
-    }
-    
-    private var copyButton: some View {
-        Button(action: {
-            UIPasteboard.general.string = note.content
-            withAnimation(.easeInOut(duration: 0.3)) {
-                showCopiedNotification = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    showCopiedNotification = false
-                }
-            }
-        }) {
-            Text("Copy")
-                .font(.system(size: 16, weight: .regular, design: .monospaced))
-        }
-        .foregroundColor(colorScheme == .dark ? .draculaPurple : .blue)
     }
     
     private func saveNote() {
@@ -236,33 +209,36 @@ struct NoteDetailView: View {
         editedContent.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
     }
     
-    private var cancelButton: some View {
-        Button(action: {
-            if editedContent != note.content {
-                showUnsavedChangesAlert()
-            } else {
-                cancelEdit()
-            }
-        }) {
-            Text("Cancel")
-                .font(.system(size: 16, weight: .regular, design: .monospaced))
-        }
-        .foregroundColor(colorScheme == .dark ? .draculaPink : .red)
-    }
-    
-    private func cancelEdit() {
-        withAnimation {
-            isEditing = false
-            editedContent = note.content
-        }
-    }
-    
     private func showUnsavedChangesAlert() {
         showingUnsavedChangesAlert = true
     }
     
     private func navigateBack() {
         presentationMode.wrappedValue.dismiss()
+    }
+    
+    private var infoButton: some View {
+        Button(action: {
+            showingInfoAlert = true
+        }) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 18))
+                .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
+        }
+    }
+    
+    private func copyNoteContent() {
+        UIPasteboard.general.string = note.content
+        
+        withAnimation(.easeInOut(duration: 0.3)) {
+            showCopiedNotification = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showCopiedNotification = false
+            }
+        }
     }
 }
 
@@ -281,12 +257,15 @@ struct NoteEditView: View {
     @State private var animateContent = false
     @State private var showingCharacterCount = false
     @FocusState private var isTextFieldFocused: Bool
+    @State private var currentNote: Note?
+    @State private var isKeyboardVisible = false
     
-    init(authManager: AuthenticationManager, mode: Mode, content: String = "", onSave: @escaping (Note) -> Void) {
+    init(authManager: AuthenticationManager, mode: Mode, content: String = "", existingNote: Note? = nil, onSave: @escaping (Note) -> Void) {
         self.authManager = authManager
         self.mode = mode
         self._content = State(initialValue: content)
         self.onSave = onSave
+        self._currentNote = State(initialValue: existingNote)
     }
     
     var body: some View {
@@ -294,16 +273,18 @@ struct NoteEditView: View {
             backgroundColor.edgesIgnoringSafeArea(.all)
             
             VStack(spacing: 0) {
-                topBar
-                
-                TextEditor(text: $content)
-                    .font(.system(size: 16, weight: .regular, design: .monospaced))
-                    .padding()
-                    .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                    .background(Color.clear)
-                    .focused($isTextFieldFocused)
-                
-                bottomBar
+                if let note = currentNote, mode == .add {
+                    NoteDetailView(note: note, onSave: onSave)
+                } else {
+                    TextEditor(text: $content)
+                        .font(.system(size: 16, weight: .regular, design: .monospaced))
+                        .padding()
+                        .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+                        .background(Color.clear)
+                        .focused($isTextFieldFocused)
+                    
+                    bottomBar
+                }
             }
         }
         .navigationBarTitle("", displayMode: .inline)
@@ -322,21 +303,16 @@ struct NoteEditView: View {
                 isTextFieldFocused = true
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
+        }
     }
     
     private var backgroundColor: Color {
         colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground)
-    }
-    
-    private var topBar: some View {
-        HStack {
-            pasteButton
-            Spacer()
-            saveButton
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color.clear)
     }
     
     private var bottomBar: some View {
@@ -347,17 +323,36 @@ struct NoteEditView: View {
             
             Spacer()
             
-            Button(action: {
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            }) {
-                Text("Hide Keyboard")
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+            if isKeyboardVisible {
+                hideKeyboardButton
             }
+            
+            Spacer()
+            
+            pasteButton
+            
+            Spacer()
+            
+            saveButton
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(Color.clear)
+    }
+    
+    private var hideKeyboardButton: some View {
+        Button(action: {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            isKeyboardVisible = false
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: "keyboard.chevron.compact.down")
+                    .font(.system(size: 16))
+                Text("Hide")
+                    .font(.system(size: 16, weight: .regular, design: .monospaced))
+            }
+            .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+        }
     }
     
     private var pasteButton: some View {
@@ -366,42 +361,43 @@ struct NoteEditView: View {
                 content += pastedText
             }
         }) {
-            HStack {
-                Image("paste_button")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 30) // Increased from 24
+            HStack(spacing: 4) {
+                Image(systemName: "doc.on.clipboard")
+                    .font(.system(size: 16))
                 Text("Paste")
                     .font(.system(size: 16, weight: .regular, design: .monospaced))
             }
-            .foregroundColor(.white)
+            .foregroundColor(colorScheme == .dark ? .draculaPurple : .blue)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(colorScheme == .dark ? Color.draculaPurple : Color.blue)
-        .cornerRadius(8)
     }
     
     private var saveButton: some View {
         Button(action: {
-            let newNote = Note(content: content.trimmingCharacters(in: .whitespacesAndNewlines), timestamp: Date(), userId: authManager.user?.uid ?? "")
-            onSave(newNote)
-            presentationMode.wrappedValue.dismiss()
+            if mode == .add {
+                let newNote = Note(content: content.trimmingCharacters(in: .whitespacesAndNewlines), timestamp: Date(), userId: authManager.user?.uid ?? "")
+                onSave(newNote)
+                currentNote = newNote
+            } else if let existingNote = currentNote {
+                let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                if existingNote.content != trimmedContent {
+                    var updatedNote = existingNote
+                    updatedNote.content = trimmedContent
+                    updatedNote.timestamp = Date() // Only update timestamp if content changed
+                    onSave(updatedNote)
+                } else {
+                    // If content hasn't changed, just call onSave with the existing note
+                    onSave(existingNote)
+                }
+            }
         }) {
-            HStack {
-                Image("save_button")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 30) // Increased from 24
-                Text("Save")
+            HStack(spacing: 4) {
+                Image(systemName: mode == .add ? "square.and.arrow.down" : "checkmark")
+                    .font(.system(size: 16))
+                Text(mode == .add ? "Save" : "Done")
                     .font(.system(size: 16, weight: .regular, design: .monospaced))
             }
-            .foregroundColor(.white)
+            .foregroundColor(content.isEmpty ? .gray : (colorScheme == .dark ? .draculaGreen : .blue))
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(content.isEmpty ? Color.gray.opacity(0.5) : (colorScheme == .dark ? Color.draculaGreen : Color.blue))
-        .cornerRadius(8)
         .disabled(content.isEmpty)
     }
     

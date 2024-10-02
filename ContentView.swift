@@ -251,13 +251,15 @@ struct ContentView: View {
                 }
                 .listRowBackground(colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground))
                 .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        noteToDelete = note
-                        showingDeleteConfirmation = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
+                    if !note.isPinned {
+                        Button(role: .destructive) {
+                            noteToDelete = note
+                            showingDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .tint(.draculaPink)
                     }
-                    .tint(.draculaPink)
                 }
                 .swipeActions(edge: .leading) {
                     Button(action: {
