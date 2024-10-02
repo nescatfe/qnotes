@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>152230258131-3ot15kl7jucd5mc7p11konehm9v2sud7.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.152230258131-3ot15kl7jucd5mc7p11konehm9v2sud7</string>
+	<key>API_KEY</key>
+	<string>AIzaSyDJhMnTW4weJ9PpSFHd6nKKjfdkTzhM1oQ</string>
+	<key>GCM_SENDER_ID</key>
+	<string>152230258131</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>Fajar.Qnote</string>
+	<key>PROJECT_ID</key>
+	<string>quick-notes-45f19</string>
+	<key>STORAGE_BUCKET</key>
+	<string>quick-notes-45f19.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:152230258131:ios:8757c51d979f652369bb26</string>
+</dict>
+</plist>
