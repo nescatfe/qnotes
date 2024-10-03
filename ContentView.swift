@@ -121,7 +121,7 @@ struct ContentView: View {
                 searchBar
                 notesList
             }
-            .navigationTitle("Qnotes")
+            .navigationTitle("Qnote")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
