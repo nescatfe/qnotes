@@ -669,9 +669,11 @@ struct ContentView: View {
         }) {
             Image(systemName: "icloud.and.arrow.up")
                 .font(.system(size: 18))
-                .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
+                .foregroundColor(connectivityManager.isConnected ? 
+                    (colorScheme == .dark ? .draculaPurple : .draculaPurple) : 
+                    .gray)
         }
-        .disabled(isUploading)
+        .disabled(!connectivityManager.isConnected || isUploading)
         .overlay(
             Group {
                 if isUploading {

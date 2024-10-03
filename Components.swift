@@ -105,11 +105,11 @@ struct NoteRowView: View {
     private var syncStatusText: String {
         switch note.syncState {
         case .notSynced:
-            return "Not synced"
+            return "Local"
         case .syncing:
             return "Syncing"
         case .synced:
-            return "Synced"
+            return "Cloud"
         }
     }
     
