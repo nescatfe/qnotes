@@ -155,7 +155,7 @@ struct SettingsView: View {
                     .frame(width: 30)
                 Text("Version")
                 Spacer()
-                Text("1.0.0")
+                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")
                     .foregroundColor(.gray)
             }
         }

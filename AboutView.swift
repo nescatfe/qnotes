@@ -27,7 +27,7 @@ struct AboutView: View {
                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                     .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
                 
-                Text("Version 1.0.0")
+                Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")")
                     .font(.system(size: 16, weight: .medium, design: .monospaced))
                     .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
                 
