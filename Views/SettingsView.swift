@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 import CoreData
+import SDWebImageSwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var authManager: AuthenticationManager
@@ -14,6 +15,7 @@ struct SettingsView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.presentationMode) var presentationMode
     @Binding var notes: [Note]
+    @State private var userProfileImageURL: URL?
     
     var body: some View {
         List {
@@ -74,17 +76,12 @@ struct SettingsView: View {
     
     private var userProfileSection: some View {
         HStack {
-            if let imageURL = authManager.user?.photoURL {
-                AsyncImage(url: imageURL) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 80, height: 80)
-                        .clipShape(Circle())
-                } placeholder: {
-                    ProgressView()
-                        .frame(width: 80, height: 80)
-                }
+            if let imageURL = userProfileImageURL {
+                WebImage(url: imageURL)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 80, height: 80)
+                    .clipShape(Circle())
             } else {
                 Image(systemName: "person.crop.circle.fill")
                     .resizable()
@@ -102,6 +99,15 @@ struct SettingsView: View {
             .padding(.leading, 8)
         }
         .padding(.vertical, 8)
+        .onAppear {
+            loadUserProfileImageURL()
+        }
+    }
+    
+    private func loadUserProfileImageURL() {
+        if let photoURL = Auth.auth().currentUser?.photoURL {
+            userProfileImageURL = photoURL
+        }
     }
     
     private var accountInfoSection: some View {

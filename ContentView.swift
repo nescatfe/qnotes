@@ -11,7 +11,7 @@ import FirebaseAuth
 import CoreData
 import Network
 import Combine
-// import SDWebImageSwiftUI
+import SDWebImageSwiftUI
 
 // Define Dracula theme colors
 extension Color {
@@ -496,13 +496,13 @@ private func syncNoteToFirebase(_ note: Note) {
             print("Error deleting note from Core Data: \(error)")
         }
         
-        // Add to deletedNoteIds for syncing later
-        deletedNoteIds.insert("\(userId):\(note.id)")
-        UserDefaults.standard.setDeletedNoteIds(deletedNoteIds)
-        
         // If online, delete from Firebase
         if connectivityManager.isConnected {
             deleteNoteFromFirebase(note)
+        } else {
+            // Add to deletedNoteIds for syncing later
+            deletedNoteIds.insert("\(userId):\(note.id)")
+            UserDefaults.standard.setDeletedNoteIds(deletedNoteIds)
         }
     }
     
@@ -583,17 +583,12 @@ private func syncNoteToFirebase(_ note: Note) {
             showingSettings = true
         }) {
             if let imageURL = userProfileImageURL {
-                AsyncImage(url: imageURL) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 30, height: 30)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.gray, lineWidth: 1))
-                } placeholder: {
-                    ProgressView()
-                        .frame(width: 30, height: 30)
-                }
+                WebImage(url: imageURL)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 30, height: 30)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.gray, lineWidth: 1))
             } else {
                 Image(systemName: "person.crop.circle")
                     .font(.system(size: 22))
@@ -603,7 +598,9 @@ private func syncNoteToFirebase(_ note: Note) {
     }
     
     private func loadUserProfileImageURL() {
-        userProfileImageURL = Auth.auth().currentUser?.photoURL
+        if let photoURL = Auth.auth().currentUser?.photoURL {
+            userProfileImageURL = photoURL
+        }
     }
     
     private func logout() {
