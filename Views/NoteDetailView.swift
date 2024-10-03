@@ -135,7 +135,7 @@ struct NoteDetailView: View {
     private var copiedNotificationView: some View {
         VStack {
             Spacer()
-            Text("Copied")
+            Text("All Content Copied")
                 .font(.system(size: 16, weight: .medium, design: .monospaced))
                 .padding()
                 .background(Color.draculaGreen)

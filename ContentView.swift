@@ -93,8 +93,8 @@ struct ContentView: View {
                     userProfileButton
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    refreshButton
                     uploadButton
+                    refreshButton
                     addButton
                 }
             }
@@ -700,6 +700,7 @@ struct ContentView: View {
                 if success {
                     if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
                         self.notes[index].syncState = .synced
+                        self.updateNoteInCoreData(self.notes[index])
                     }
                 }
                 group.leave()
@@ -709,6 +710,27 @@ struct ContentView: View {
         group.notify(queue: .main) {
             self.isUploading = false
             // Optionally show a completion message
+        }
+    }
+    
+    private func updateNoteInCoreData(_ note: Note) {
+        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", note.id)
+        
+        do {
+            let results = try viewContext.fetch(fetchRequest)
+            if let existingNote = results.first {
+                existingNote.content = note.content
+                existingNote.timestamp = note.timestamp
+                existingNote.isPinned = note.isPinned
+                existingNote.userId = note.userId
+                existingNote.needsSync = false
+                existingNote.syncStateEnum = .synced
+                
+                try viewContext.save()
+            }
+        } catch {
+            print("Error updating note in Core Data: \(error)")
         }
     }
     
