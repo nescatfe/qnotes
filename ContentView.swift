@@ -59,6 +59,7 @@ struct ContentView: View {
     @State private var currentPage = 1
     @State private var hasMoreNotes = true
     private let notesPerPage = 20
+    @State private var isUploading = false
     
     var body: some View {
         Group {
@@ -92,8 +93,8 @@ struct ContentView: View {
                     userProfileButton
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    pasteButton
                     refreshButton
+                    uploadButton
                     addButton
                 }
             }
@@ -122,13 +123,6 @@ struct ContentView: View {
             NavigationStack {
                 SettingsView(showingLogoutConfirmation: $showingLogoutConfirmation, connectivityManager: connectivityManager, notes: $notes)
                     .environment(\.managedObjectContext, viewContext)
-            }
-        }
-        .sheet(isPresented: $isCreatingNoteFromClipboard) {
-            if let clipboardContent = UIPasteboard.general.string, !clipboardContent.isEmpty {
-                NoteEditView(authManager: authManager, mode: .add, content: clipboardContent) { newNote in
-                    addNote(newNote)
-                }
             }
         }
     }
@@ -390,102 +384,14 @@ struct ContentView: View {
     }
     
     private func addNote(_ note: Note) {
-        guard let userId = authManager.user?.uid else { return }
-        var trimmedNote = note
-        trimmedNote.content = note.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        trimmedNote.userId = userId
-        trimmedNote.syncState = .notSynced
-        
-        // Add to local Core Data
-        let newNote = CDNote(context: viewContext)
-        newNote.id = trimmedNote.id
-        newNote.userId = userId
-        newNote.content = trimmedNote.content
-        newNote.timestamp = trimmedNote.timestamp
-        newNote.isPinned = trimmedNote.isPinned
-        newNote.needsSync = true
-        newNote.syncStateEnum = trimmedNote.syncState
-        
-        do {
-            try viewContext.save()
-            notes.append(trimmedNote)
-        } catch {
-            print("Error saving note to Core Data: \(error)")
-        }
-        
-        // If online, sync to Firebase
-        if connectivityManager.isConnected {
-            syncNoteToFirebase(trimmedNote)
-        }
-    }
-    
-    private func syncNoteToFirebase(_ note: Note) {
-        guard let userId = authManager.user?.uid else { return }
-        let db = Firestore.firestore()
-        if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
-            self.notes[index].syncState = .syncing
-        }
-        
-        db.collection("users").document(userId).collection("notes").document(note.id).setData([
-            "content": note.content,
-            "timestamp": Timestamp(date: note.timestamp),
-            "isPinned": note.isPinned
-        ]) { error in
-            if let error = error {
-                print("Error syncing note to Firebase: \(error.localizedDescription)")
-                if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
-                    self.notes[index].syncState = .notSynced
-                }
-            } else {
-                if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
-                    self.notes[index].syncState = .synced
-                }
-                
-                // Update Core Data
-                let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-                fetchRequest.predicate = NSPredicate(format: "id == %@ AND userId == %@", note.id, userId)
-                
-                do {
-                    let results = try self.viewContext.fetch(fetchRequest)
-                    if let existingNote = results.first {
-                        existingNote.needsSync = false
-                        existingNote.syncStateEnum = note.syncState
-                        try self.viewContext.save()
-                    }
-                } catch {
-                    print("Error marking note as synced in Core Data: \(error)")
-                }
-            }
-        }
+        notes.insert(note, at: 0)
+        saveNoteToCoreData(note)
     }
     
     private func updateNote(_ updatedNote: Note) {
         if let index = notes.firstIndex(where: { $0.id == updatedNote.id }) {
             notes[index] = updatedNote
-            notes[index].syncState = .notSynced
-        }
-        
-        // Update in Core Data
-        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@", updatedNote.id)
-        
-        do {
-            let results = try viewContext.fetch(fetchRequest)
-            if let existingNote = results.first {
-                existingNote.content = updatedNote.content
-                existingNote.timestamp = updatedNote.timestamp
-                existingNote.isPinned = updatedNote.isPinned
-                existingNote.needsSync = true
-                existingNote.syncStateEnum = updatedNote.syncState
-                try viewContext.save()
-            }
-        } catch {
-            print("Error updating note in Core Data: \(error)")
-        }
-        
-        // If online, sync to Firebase
-        if connectivityManager.isConnected {
-            syncNoteToFirebase(updatedNote)
+            saveNoteToCoreData(updatedNote)
         }
     }
     
@@ -543,7 +449,19 @@ struct ContentView: View {
             let notesToSync = try viewContext.fetch(fetchRequest)
             for cdNote in notesToSync {
                 let note = cdNote.toNote()
-                syncNoteToFirebase(note)
+                uploadNoteToFirebase(note) { success in
+                    if success {
+                        DispatchQueue.main.async {
+                            cdNote.needsSync = false
+                            cdNote.syncStateEnum = .synced
+                            do {
+                                try self.viewContext.save()
+                            } catch {
+                                print("Error saving Core Data context: \(error)")
+                            }
+                        }
+                    }
+                }
             }
         } catch {
             print("Error fetching notes to sync: \(error)")
@@ -737,15 +655,112 @@ struct ContentView: View {
         }
     }
     
-    private var pasteButton: some View {
+    private var backgroundColor: Color {
+        if colorScheme == .dark {
+            return Color(red: 20/255, green: 21/255, blue: 28/255) // Even darker background for dark mode
+        } else {
+            return Color.white // Normal white for light mode
+        }
+    }
+    
+    private var uploadButton: some View {
         Button(action: {
-            if let clipboardContent = UIPasteboard.general.string, !clipboardContent.isEmpty {
-                isCreatingNoteFromClipboard = true
-            }
+            uploadAllLocalNotes()
         }) {
-            Image(systemName: "doc.on.clipboard")
+            Image(systemName: "icloud.and.arrow.up")
                 .font(.system(size: 18))
                 .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
+        }
+        .disabled(isUploading)
+        .overlay(
+            Group {
+                if isUploading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
+                }
+            }
+        )
+    }
+    
+    private func uploadAllLocalNotes() {
+        guard connectivityManager.isConnected else {
+            // Show an alert that upload is not available offline
+            return
+        }
+        
+        isUploading = true
+        
+        let localNotes = notes.filter { $0.syncState != .synced }
+        let group = DispatchGroup()
+        
+        for note in localNotes {
+            group.enter()
+            uploadNoteToFirebase(note) { success in
+                if success {
+                    if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+                        self.notes[index].syncState = .synced
+                    }
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            self.isUploading = false
+            // Optionally show a completion message
+        }
+    }
+    
+    private func saveNoteToCoreData(_ note: Note) {
+        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id == %@", note.id)
+        
+        do {
+            let results = try viewContext.fetch(fetchRequest)
+            let cdNote: CDNote
+            if let existingNote = results.first {
+                cdNote = existingNote
+            } else {
+                cdNote = CDNote(context: viewContext)
+                cdNote.id = note.id
+            }
+            
+            cdNote.content = note.content
+            cdNote.timestamp = note.timestamp
+            cdNote.isPinned = note.isPinned
+            cdNote.userId = note.userId
+            cdNote.needsSync = true
+            cdNote.syncStateEnum = .notSynced
+            
+            try viewContext.save()
+        } catch {
+            print("Error saving note to Core Data: \(error)")
+        }
+    }
+    
+    private func uploadNoteToFirebase(_ note: Note, completion: @escaping (Bool) -> Void) {
+        guard let userId = authManager.user?.uid else {
+            completion(false)
+            return
+        }
+        
+        let db = Firestore.firestore()
+        let noteRef = db.collection("users").document(userId).collection("notes").document(note.id)
+        
+        let data: [String: Any] = [
+            "content": note.content,
+            "timestamp": note.timestamp,
+            "isPinned": note.isPinned
+        ]
+        
+        noteRef.setData(data) { error in
+            if let error = error {
+                print("Error uploading note: \(error)")
+                completion(false)
+            } else {
+                completion(true)
+            }
         }
     }
     
@@ -785,14 +800,6 @@ struct ContentView: View {
             try viewContext.save()
         } catch {
             print("Error saving notes to Core Data: \(error)")
-        }
-    }
-    
-    private var backgroundColor: Color {
-        if colorScheme == .dark {
-            return Color(red: 20/255, green: 21/255, blue: 28/255) // Even darker background for dark mode
-        } else {
-            return Color.white // Normal white for light mode
         }
     }
 }

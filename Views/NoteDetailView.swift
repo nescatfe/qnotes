@@ -1,6 +1,6 @@
 import SwiftUI
 import Combine
-// Import any other necessary modules
+import UIKit
 
 struct NoteDetailView: View {
     @Environment(\.colorScheme) var colorScheme
@@ -12,7 +12,6 @@ struct NoteDetailView: View {
     @State private var showCopiedNotification = false
     @State private var isLoading = true
     @State private var animateContent = false
-    @State private var contentChunks: [String] = []
     @State private var showingUnsavedChangesAlert = false
     @State private var showingInfoAlert = false
     
@@ -24,13 +23,8 @@ struct NoteDetailView: View {
         self.onSave = onSave
     }
     
-    // Add this computed property at the top level of the NoteDetailView struct
     private var backgroundColor: Color {
-        if colorScheme == .dark {
-            return Color(red: 20/255, green: 21/255, blue: 28/255) // Even darker background for dark mode
-        } else {
-            return Color.white // Normal white for light mode
-        }
+        colorScheme == .dark ? Color(red: 20/255, green: 21/255, blue: 28/255) : Color.white
     }
     
     var body: some View {
@@ -63,9 +57,10 @@ struct NoteDetailView: View {
                     Text("Note")
                         .font(.system(size: 17, weight: .regular, design: .monospaced))
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if !isEditing {
-                        infoButton
+                        editButton
+                        copyButton
                     }
                 }
             }
@@ -94,38 +89,46 @@ struct NoteDetailView: View {
     }
     
     private var noteContentView: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    Text(formatDate(note.timestamp))
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-                    
-                    Spacer()
-                    
-                    Text("\(wordCount)w / \(note.content.count)c")
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-                }
-                .padding(.horizontal)
+        VStack(spacing: 16) {
+            HStack {
+                Text(formatDate(note.timestamp))
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
                 
-                ForEach(contentChunks.indices, id: \.self) { index in
-                    Text(contentChunks[index])
-                        .font(.system(size: 16, weight: .regular, design: .monospaced))
-                        .padding(.horizontal)
-                        .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                }
+                Spacer()
+                
+                Text("\(wordCount)w / \(note.content.count)c")
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
             }
-            .opacity(animateContent ? 1 : 0)
-            .offset(y: animateContent ? 0 : 20)
+            .padding(.horizontal)
+            
+            EfficientTextView(text: note.content, textColor: colorScheme == .dark ? .draculaForeground : .primary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onTapGesture(count: 2) {
+        .opacity(animateContent ? 1 : 0)
+        .offset(y: animateContent ? 0 : 20)
+    }
+    
+    private var editButton: some View {
+        Button(action: {
             withAnimation(.easeInOut(duration: 0.3)) {
                 isEditing = true
             }
+        }) {
+            Text("Edit")
+                .font(.system(size: 16, weight: .regular, design: .monospaced))
+                .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
         }
-        .onLongPressGesture(minimumDuration: 0.5) {
+    }
+    
+    private var copyButton: some View {
+        Button(action: {
             copyNoteContent()
+        }) {
+            Text("Copy")
+                .font(.system(size: 16, weight: .regular, design: .monospaced))
+                .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
         }
     }
     
@@ -167,14 +170,9 @@ struct NoteDetailView: View {
     }
     
     private func loadNoteContent() {
+        isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
             let content = self.note.content
-            let chunkSize = 1000 // Adjust this value based on performance
-            self.contentChunks = stride(from: 0, to: content.count, by: chunkSize).map {
-                let startIndex = content.index(content.startIndex, offsetBy: $0)
-                let endIndex = content.index(startIndex, offsetBy: min(chunkSize, content.count - $0))
-                return String(content[startIndex..<endIndex])
-            }
             
             DispatchQueue.main.async {
                 self.editedContent = content
@@ -226,16 +224,6 @@ struct NoteDetailView: View {
         presentationMode.wrappedValue.dismiss()
     }
     
-    private var infoButton: some View {
-        Button(action: {
-            showingInfoAlert = true
-        }) {
-            Image(systemName: "info.circle")
-                .font(.system(size: 18))
-                .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
-        }
-    }
-    
     private func copyNoteContent() {
         UIPasteboard.general.string = note.content
         
@@ -247,6 +235,43 @@ struct NoteDetailView: View {
             withAnimation(.easeInOut(duration: 0.3)) {
                 showCopiedNotification = false
             }
+        }
+    }
+}
+
+struct EfficientTextView: UIViewRepresentable {
+    let text: String
+    let textColor: Color
+    
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = true
+        textView.font = UIFont.monospacedSystemFont(ofSize: 16, weight: .regular)
+        textView.backgroundColor = .clear
+        textView.textColor = UIColor(textColor)
+        textView.textContainerInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+        
+        // Optimize for large content
+        textView.layoutManager.allowsNonContiguousLayout = true
+        textView.textContainer.lineFragmentPadding = 0
+        textView.layoutManager.usesFontLeading = false
+        
+        // Disable unnecessary features for better performance
+        textView.dataDetectorTypes = []
+        textView.autocorrectionType = .no
+        textView.autocapitalizationType = .none
+        textView.spellCheckingType = .no
+        
+        return textView
+    }
+    
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+            uiView.textColor = UIColor(textColor)
+            uiView.setContentOffset(.zero, animated: false)
         }
     }
 }

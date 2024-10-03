@@ -5,7 +5,6 @@
 //  Created by coolskyz on 03/10/24.
 //
 import SwiftUI
-import Combine
 
 // Define Dracula theme colors
 extension Color {
@@ -46,6 +45,7 @@ struct Note: Identifiable, Equatable, Hashable {
     var isPinned: Bool = false
     var userId: String
     var syncState: SyncState = .notSynced
+    var needsSync: Bool = true
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)

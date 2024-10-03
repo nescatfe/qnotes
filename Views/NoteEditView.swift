@@ -15,6 +15,8 @@ struct NoteEditView: View {
     let onSave: (Note) -> Void
     @State private var content: String
     @State private var currentNote: Note?
+    @State private var isContentValid: Bool = false
+    @State private var isSaving: Bool = false
     
     init(authManager: AuthenticationManager, mode: Mode, content: String = "", existingNote: Note? = nil, onSave: @escaping (Note) -> Void) {
         self.authManager = authManager
@@ -33,14 +35,12 @@ struct NoteEditView: View {
             backgroundColor.edgesIgnoringSafeArea(.all)
             
             VStack(spacing: 0) {
-                if let note = currentNote, mode == .add {
-                    NoteDetailView(note: note, onSave: onSave)
-                } else {
-                    SimpleLargeTextEditor(text: $content)
-                        .padding()
-                    
-                    bottomBar
-                }
+                SimpleLargeTextEditor(text: $content, isContentValid: $isContentValid)
+                    .padding()
+                
+                saveButton
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
             }
         }
         .navigationBarTitle("", displayMode: .inline)
@@ -50,53 +50,21 @@ struct NoteEditView: View {
                     .font(.system(size: 17, weight: .regular, design: .monospaced))
             }
         }
-    }
-    
-    private var bottomBar: some View {
-        HStack {
-            Spacer()
-            pasteButton
-            Spacer()
-            saveButton
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color.clear)
-    }
-    
-    private var pasteButton: some View {
-        Button(action: {
-            if let pastedText = UIPasteboard.general.string {
-                content += pastedText
+        .overlay(
+            Group {
+                if isSaving {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.4))
+                }
             }
-        }) {
-            HStack(spacing: 4) {
-                Image(systemName: "doc.on.clipboard")
-                    .font(.system(size: 16))
-                Text("Paste")
-                    .font(.system(size: 16, weight: .regular, design: .monospaced))
-            }
-            .foregroundColor(colorScheme == .dark ? .draculaPurple : .blue)
-        }
+        )
     }
     
     private var saveButton: some View {
         Button(action: {
-            if mode == .add {
-                let newNote = Note(content: content.trimmingCharacters(in: .whitespacesAndNewlines), timestamp: Date(), userId: authManager.user?.uid ?? "")
-                onSave(newNote)
-                currentNote = newNote
-            } else if let existingNote = currentNote {
-                let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
-                if existingNote.content != trimmedContent {
-                    var updatedNote = existingNote
-                    updatedNote.content = trimmedContent
-                    updatedNote.timestamp = Date()
-                    onSave(updatedNote)
-                } else {
-                    onSave(existingNote)
-                }
-            }
+            saveNote()
         }) {
             HStack(spacing: 4) {
                 Image(systemName: mode == .add ? "square.and.arrow.down" : "checkmark")
@@ -104,28 +72,70 @@ struct NoteEditView: View {
                 Text(mode == .add ? "Save" : "Done")
                     .font(.system(size: 16, weight: .regular, design: .monospaced))
             }
-            .foregroundColor(content.isEmpty ? .gray : (colorScheme == .dark ? .draculaGreen : .blue))
+            .foregroundColor(isContentValid ? (colorScheme == .dark ? .draculaGreen : .blue) : .gray)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isContentValid ? (colorScheme == .dark ? .draculaGreen.opacity(0.2) : .blue.opacity(0.1)) : Color.gray.opacity(0.1))
+            )
         }
-        .disabled(content.isEmpty)
+        .disabled(!isContentValid || isSaving)
+    }
+    
+    private func saveNote() {
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedContent.isEmpty {
+            isSaving = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                let newNote: Note
+                if mode == .add {
+                    newNote = Note(content: trimmedContent, timestamp: Date(), userId: authManager.user?.uid ?? "")
+                } else if let existingNote = currentNote {
+                    newNote = Note(id: existingNote.id, content: trimmedContent, timestamp: Date(), isPinned: existingNote.isPinned, userId: existingNote.userId, syncState: .notSynced)
+                } else {
+                    return
+                }
+                
+                DispatchQueue.main.async {
+                    onSave(newNote)
+                    isSaving = false
+                    presentationMode.wrappedValue.dismiss()
+                }
+            }
+        }
     }
 }
 
 struct SimpleLargeTextEditor: UIViewRepresentable {
     @Binding var text: String
+    @Binding var isContentValid: Bool
     
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.font = UIFont.monospacedSystemFont(ofSize: 16, weight: .regular)
         textView.backgroundColor = .clear
         textView.isScrollEnabled = true
-        textView.autocapitalizationType = .sentences
-        textView.autocorrectionType = .default
-        textView.spellCheckingType = .default
+        textView.delegate = context.coordinator
+        
+        textView.layoutManager.allowsNonContiguousLayout = true
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        textView.layoutManager.usesFontLeading = false
+        
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.dataDetectorTypes = []
+        
         return textView
     }
     
     func updateUIView(_ uiView: UITextView, context: Context) {
-        uiView.text = text
+        if uiView.text != text {
+            let selectedRange = uiView.selectedRange
+            uiView.text = text
+            uiView.selectedRange = selectedRange
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -134,13 +144,29 @@ struct SimpleLargeTextEditor: UIViewRepresentable {
     
     class Coordinator: NSObject, UITextViewDelegate {
         var parent: SimpleLargeTextEditor
+        private var debounceWorkItem: DispatchWorkItem?
         
         init(_ parent: SimpleLargeTextEditor) {
             self.parent = parent
         }
         
         func textViewDidChange(_ textView: UITextView) {
-            parent.text = textView.text
+            debounceWorkItem?.cancel()
+            
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.parent.text = textView.text
+                self?.updateContentValidity(textView)
+            }
+            
+            debounceWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
+        }
+        
+        func updateContentValidity(_ textView: UITextView) {
+            let trimmedText = textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            DispatchQueue.main.async {
+                self.parent.isContentValid = !trimmedText.isEmpty
+            }
         }
     }
 }
