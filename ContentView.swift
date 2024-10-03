@@ -95,6 +95,10 @@ struct ContentView: View {
     @State private var isRefreshing = false
     @State private var userProfileImageURL: URL?
     @State private var isCreatingNoteFromClipboard = false
+    @State private var isLoading = false
+    @State private var currentPage = 1
+    @State private var hasMoreNotes = true
+    private let notesPerPage = 20
     
     var body: some View {
         Group {
@@ -228,55 +232,78 @@ struct ContentView: View {
     }
     
     private var notesList: some View {
-        List {
-            ForEach(filteredNotes) { note in
-                NavigationLink(value: note) {
-                    HStack(spacing: 12) {
-                        if note.isPinned {
-                            Image(systemName: "pin.fill")
-                                .foregroundColor(.draculaYellow)
+        Group {
+            if notes.isEmpty {
+                emptyNotesView
+            } else {
+                List {
+                    ForEach(filteredNotes) { note in
+                        NavigationLink(value: note) {
+                            NoteRowView(note: note)
                         }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(note.content.trimmingCharacters(in: .whitespacesAndNewlines))
-                                .lineLimit(2)
-                                .font(.system(size: 16, weight: .regular, design: .monospaced))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                            Text(formatDate(note.timestamp))
-                                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                                .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+                        .listRowBackground(colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground))
+                        .swipeActions(edge: .trailing) {
+                            if !note.isPinned {
+                                Button(role: .destructive) {
+                                    noteToDelete = note
+                                    showingDeleteConfirmation = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                .tint(.draculaPink)
+                            }
+                        }
+                        .swipeActions(edge: .leading) {
+                            Button(action: {
+                                togglePin(note)
+                            }) {
+                                Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
+                            }
+                            .tint(.draculaYellow)
                         }
                     }
-                    .padding(.vertical, 4)
-                }
-                .listRowBackground(colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground))
-                .swipeActions(edge: .trailing) {
-                    if !note.isPinned {
-                        Button(role: .destructive) {
-                            noteToDelete = note
-                            showingDeleteConfirmation = true
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                        .tint(.draculaPink)
+                    
+                    if hasMoreNotes {
+                        ProgressView()
+                            .onAppear {
+                                loadMoreNotes()
+                            }
                     }
                 }
-                .swipeActions(edge: .leading) {
-                    Button(action: {
-                        togglePin(note)
-                    }) {
-                        Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
-                    }
-                    .tint(.draculaYellow)
-                }
-                .transition(.opacity.combined(with: .slide))
-                .animation(.easeInOut, value: animateList)
+                .listStyle(PlainListStyle())
             }
         }
-        .listStyle(PlainListStyle())
-        .navigationDestination(for: Note.self) { note in
-            NoteDetailView(note: note, onSave: updateNote)
+    }
+    
+    private var emptyNotesView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "note.text")
+                .font(.system(size: 60))
+                .foregroundColor(.draculaComment)
+            
+            Text("No Notes Yet")
+                .font(.system(size: 24, weight: .bold, design: .monospaced))
+                .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+            
+            Text("Tap 'Create New' to add your first note")
+                .font(.system(size: 16, design: .monospaced))
+                .foregroundColor(.draculaComment)
+                .multilineTextAlignment(.center)
+            
+            Button(action: { isAddingNewNote = true }) {
+                Text("Create New Note")
+                    .font(.system(size: 16, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Color.draculaGreen)
+                    .cornerRadius(8)
+            }
+            .padding(.top, 10)
         }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground))
     }
     
     private var addButton: some View {
@@ -288,6 +315,9 @@ struct ContentView: View {
     }
     
     private var filteredNotes: [Note] {
+        if notes.isEmpty {
+            return []
+        }
         let sorted = notes.sorted { 
             if $0.isPinned == $1.isPinned {
                 return $0.timestamp > $1.timestamp
@@ -300,153 +330,160 @@ struct ContentView: View {
             return sorted.filter { $0.content.lowercased().contains(searchText.lowercased()) }
         }
     }
-    private func formatDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "dd MMM yyyy / HH:mm"
-        return formatter.string(from: date)
-    }
     
     private func fetchNotes() {
+        isLoading = true
+        currentPage = 1
+        hasMoreNotes = true
+        
         if connectivityManager.isConnected {
-            fetchNotesFromFirebase()
+            fetchNotesFromFirebase(page: currentPage)
         } else {
-            fetchNotesFromCoreData()
+            fetchNotesFromCoreData(page: currentPage)
         }
     }
     
-private func fetchNotesFromFirebase() {
-    guard let userId = authManager.user?.uid else { return }
-    let db = Firestore.firestore()
-    db.collection("users").document(userId).collection("notes").getDocuments { (querySnapshot, error) in
-        if let error = error {
-            print("Error fetching documents: \(error)")
-            return
-        }
+    private func loadMoreNotes() {
+        guard !isLoading && hasMoreNotes else { return }
+        currentPage += 1
         
-        guard let documents = querySnapshot?.documents else {
-            print("No documents")
-            return
+        if connectivityManager.isConnected {
+            fetchNotesFromFirebase(page: currentPage)
+        } else {
+            fetchNotesFromCoreData(page: currentPage)
         }
+    }
+    
+    private func fetchNotesFromFirebase(page: Int) {
+        guard let userId = authManager.user?.uid else { return }
+        isLoading = true
         
-        self.notes = documents.compactMap { document -> Note? in
-            let data = document.data()
-            guard let content = data["content"] as? String,
-                  let timestamp = (data["timestamp"] as? Timestamp)?.dateValue(),
-                  let isPinned = data["isPinned"] as? Bool else {
-                return nil
+        let db = Firestore.firestore()
+        let notesRef = db.collection("users").document(userId).collection("notes")
+        
+        notesRef
+            .order(by: "timestamp", descending: true)
+            .limit(to: notesPerPage * page)
+            .getDocuments { (querySnapshot, error) in
+                if let error = error {
+                    print("Error fetching documents: \(error)")
+                    isLoading = false
+                    return
+                }
+                
+                guard let documents = querySnapshot?.documents else {
+                    print("No documents")
+                    isLoading = false
+                    return
+                }
+                
+                let fetchedNotes = documents.compactMap { document -> Note? in
+                    let data = document.data()
+                    guard let content = data["content"] as? String,
+                          let timestamp = (data["timestamp"] as? Timestamp)?.dateValue(),
+                          let isPinned = data["isPinned"] as? Bool else {
+                        return nil
+                    }
+                    return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId)
+                }
+                
+                DispatchQueue.main.async {
+                    if page == 1 {
+                        self.notes = fetchedNotes
+                    } else {
+                        self.notes.append(contentsOf: fetchedNotes)
+                    }
+                    self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+                    self.isLoading = false
+                    self.syncNotesToCoreData(fetchedNotes)
+                }
             }
-            return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId)
-        }
-        
-        // Sync Firebase notes with Core Data
-        self.syncNotesToCoreData(self.notes)
     }
-}
-
-private func syncNotesToCoreData(_ notes: [Note]) {
-    guard let userId = authManager.user?.uid else { return }
     
-    for note in notes {
+    private func fetchNotesFromCoreData(page: Int) {
+        guard let userId = authManager.user?.uid else { return }
+        isLoading = true
+        
         let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id == %@ AND userId == %@", note.id, userId)
+        fetchRequest.predicate = NSPredicate(format: "userId == %@", userId)
+        fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \CDNote.timestamp, ascending: false)]
+        fetchRequest.fetchLimit = notesPerPage
+        fetchRequest.fetchOffset = (page - 1) * notesPerPage
         
         do {
-            let results = try viewContext.fetch(fetchRequest)
-            if let existingNote = results.first {
-                existingNote.content = note.content
-                existingNote.timestamp = note.timestamp
-                existingNote.isPinned = note.isPinned
-                existingNote.needsSync = false
-            } else {
-                let newNote = CDNote(context: viewContext)
-                newNote.id = note.id
-                newNote.userId = userId
-                newNote.content = note.content
-                newNote.timestamp = note.timestamp
-                newNote.isPinned = note.isPinned
-                newNote.needsSync = false
+            let cdNotes = try viewContext.fetch(fetchRequest)
+            let fetchedNotes = cdNotes.map { $0.toNote() }
+            
+            DispatchQueue.main.async {
+                if page == 1 {
+                    self.notes = fetchedNotes
+                } else {
+                    self.notes.append(contentsOf: fetchedNotes)
+                }
+                self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+                self.isLoading = false
             }
         } catch {
-            print("Error syncing note to Core Data: \(error)")
+            print("Error fetching notes from Core Data: \(error)")
+            isLoading = false
         }
     }
     
-    do {
-        try viewContext.save()
-    } catch {
-        print("Error saving context: \(error)")
-    }
-}
-
-private func fetchNotesFromCoreData() {
-    guard let userId = authManager.user?.uid else { return }
-    let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-    fetchRequest.predicate = NSPredicate(format: "userId == %@", userId)
-    fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \CDNote.timestamp, ascending: false)]
-    
-    do {
-        let cdNotes = try viewContext.fetch(fetchRequest)
-        notes = cdNotes.map { $0.toNote() }
-    } catch {
-        print("Error fetching notes from Core Data: \(error)")
-    }
-}
-
-private func addNote(_ note: Note) {
-    guard let userId = authManager.user?.uid else { return }
-    var trimmedNote = note
-    trimmedNote.content = note.content.trimmingCharacters(in: .whitespacesAndNewlines)
-    trimmedNote.userId = userId  // Add this line
-    
-    // Add to local Core Data
-    let newNote = CDNote(context: viewContext)
-    newNote.id = trimmedNote.id
-    newNote.userId = userId
-    newNote.content = trimmedNote.content
-    newNote.timestamp = trimmedNote.timestamp
-    newNote.isPinned = trimmedNote.isPinned
-    newNote.needsSync = true
-    
-    do {
-        try viewContext.save()
-        notes.append(trimmedNote)
-    } catch {
-        print("Error saving note to Core Data: \(error)")
+    private func addNote(_ note: Note) {
+        guard let userId = authManager.user?.uid else { return }
+        var trimmedNote = note
+        trimmedNote.content = note.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        trimmedNote.userId = userId  // Add this line
+        
+        // Add to local Core Data
+        let newNote = CDNote(context: viewContext)
+        newNote.id = trimmedNote.id
+        newNote.userId = userId
+        newNote.content = trimmedNote.content
+        newNote.timestamp = trimmedNote.timestamp
+        newNote.isPinned = trimmedNote.isPinned
+        newNote.needsSync = true
+        
+        do {
+            try viewContext.save()
+            notes.append(trimmedNote)
+        } catch {
+            print("Error saving note to Core Data: \(error)")
+        }
+        
+        // If online, sync to Firebase
+        if connectivityManager.isConnected {
+            syncNoteToFirebase(trimmedNote)
+        }
     }
     
-    // If online, sync to Firebase
-    if connectivityManager.isConnected {
-        syncNoteToFirebase(trimmedNote)
-    }
-}
-
-private func syncNoteToFirebase(_ note: Note) {
-    guard let userId = authManager.user?.uid else { return }
-    let db = Firestore.firestore()
-    db.collection("users").document(userId).collection("notes").document(note.id).setData([
-        "content": note.content,
-        "timestamp": Timestamp(date: note.timestamp),
-        "isPinned": note.isPinned
-    ]) { error in
-        if let error = error {
-            print("Error syncing note to Firebase: \(error.localizedDescription)")
-        } else {
-            // Mark as synced in Core Data
-            let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@ AND userId == %@", note.id, userId)
-            
-            do {
-                let results = try viewContext.fetch(fetchRequest)
-                if let existingNote = results.first {
-                    existingNote.needsSync = false
-                    try viewContext.save()
+    private func syncNoteToFirebase(_ note: Note) {
+        guard let userId = authManager.user?.uid else { return }
+        let db = Firestore.firestore()
+        db.collection("users").document(userId).collection("notes").document(note.id).setData([
+            "content": note.content,
+            "timestamp": Timestamp(date: note.timestamp),
+            "isPinned": note.isPinned
+        ]) { error in
+            if let error = error {
+                print("Error syncing note to Firebase: \(error.localizedDescription)")
+            } else {
+                // Mark as synced in Core Data
+                let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+                fetchRequest.predicate = NSPredicate(format: "id == %@ AND userId == %@", note.id, userId)
+                
+                do {
+                    let results = try viewContext.fetch(fetchRequest)
+                    if let existingNote = results.first {
+                        existingNote.needsSync = false
+                        try viewContext.save()
+                    }
+                } catch {
+                    print("Error marking note as synced in Core Data: \(error)")
                 }
-            } catch {
-                print("Error marking note as synced in Core Data: \(error)")
             }
         }
     }
-}
     
     private func updateNote(_ updatedNote: Note) {
         if let index = notes.firstIndex(where: { $0.id == updatedNote.id }) {
@@ -659,7 +696,7 @@ private func syncNoteToFirebase(_ note: Note) {
         }
         
         isRefreshing = true
-        fetchNotesFromFirebase { success in
+        fetchNotesFromFirebase(page: 1) { success in
             isRefreshing = false
             if success {
                 // Optionally show a success message
@@ -669,40 +706,52 @@ private func syncNoteToFirebase(_ note: Note) {
         }
     }
     
-    private func fetchNotesFromFirebase(completion: @escaping (Bool) -> Void) {
+    private func fetchNotesFromFirebase(page: Int, completion: @escaping (Bool) -> Void) {
         guard let userId = authManager.user?.uid else {
             completion(false)
             return
         }
         
         let db = Firestore.firestore()
-        db.collection("users").document(userId).collection("notes").getDocuments { (querySnapshot, error) in
-            if let error = error {
-                print("Error fetching documents: \(error)")
-                completion(false)
-                return
-            }
-            
-            guard let documents = querySnapshot?.documents else {
-                print("No documents")
-                completion(false)
-                return
-            }
-            
-            self.notes = documents.compactMap { document -> Note? in
-                let data = document.data()
-                guard let content = data["content"] as? String,
-                      let timestamp = (data["timestamp"] as? Timestamp)?.dateValue(),
-                      let isPinned = data["isPinned"] as? Bool else {
-                    return nil
+        let notesRef = db.collection("users").document(userId).collection("notes")
+        
+        notesRef
+            .order(by: "timestamp", descending: true)
+            .limit(to: notesPerPage * page)
+            .getDocuments { (querySnapshot, error) in
+                if let error = error {
+                    print("Error fetching documents: \(error)")
+                    completion(false)
+                    return
                 }
-                return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId)
+                
+                guard let documents = querySnapshot?.documents else {
+                    print("No documents")
+                    completion(false)
+                    return
+                }
+                
+                let fetchedNotes = documents.compactMap { document -> Note? in
+                    let data = document.data()
+                    guard let content = data["content"] as? String,
+                          let timestamp = (data["timestamp"] as? Timestamp)?.dateValue(),
+                          let isPinned = data["isPinned"] as? Bool else {
+                        return nil
+                    }
+                    return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId)
+                }
+                
+                DispatchQueue.main.async {
+                    if page == 1 {
+                        self.notes = fetchedNotes
+                    } else {
+                        self.notes.append(contentsOf: fetchedNotes)
+                    }
+                    self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+                    self.syncNotesToCoreData(fetchedNotes)
+                    completion(true)
+                }
             }
-            
-            // Sync Firebase notes with Core Data
-            self.syncNotesToCoreData(self.notes)
-            completion(true)
-        }
     }
     
     private func checkForUnpinnedNotesDeletion() {
@@ -722,6 +771,74 @@ private func syncNoteToFirebase(_ note: Note) {
                 .font(.system(size: 18))
                 .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
         }
+    }
+    
+    private func syncNotesToCoreData(_ fetchedNotes: [Note]) {
+        for note in fetchedNotes {
+            let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", note.id)
+            
+            do {
+                let results = try viewContext.fetch(fetchRequest)
+                if let existingNote = results.first {
+                    // Update existing note
+                    existingNote.content = note.content
+                    existingNote.timestamp = note.timestamp
+                    existingNote.isPinned = note.isPinned
+                    existingNote.userId = note.userId
+                    existingNote.needsSync = false
+                } else {
+                    // Create new note
+                    let newNote = CDNote(context: viewContext)
+                    newNote.id = note.id
+                    newNote.content = note.content
+                    newNote.timestamp = note.timestamp
+                    newNote.isPinned = note.isPinned
+                    newNote.userId = note.userId
+                    newNote.needsSync = false
+                }
+            } catch {
+                print("Error fetching note from Core Data: \(error)")
+            }
+        }
+        
+        // Save changes
+        do {
+            try viewContext.save()
+        } catch {
+            print("Error saving notes to Core Data: \(error)")
+        }
+    }
+}
+
+struct NoteRowView: View {
+    @Environment(\.colorScheme) var colorScheme
+    let note: Note
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            if note.isPinned {
+                Image(systemName: "pin.fill")
+                    .foregroundColor(.draculaYellow)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(note.content.trimmingCharacters(in: .whitespacesAndNewlines))
+                    .lineLimit(2)
+                    .font(.system(size: 16, weight: .regular, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+                Text(formatDate(note.timestamp))
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd MMM yyyy / HH:mm"
+        return formatter.string(from: date)
     }
 }
 
