@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import UIKit
 
 struct NoteEditView: View {
     @Environment(\.colorScheme) var colorScheme
@@ -13,11 +14,7 @@ struct NoteEditView: View {
     let mode: Mode
     let onSave: (Note) -> Void
     @State private var content: String
-    @State private var animateContent = false
-    @State private var showingCharacterCount = false
-    @FocusState private var isTextFieldFocused: Bool
     @State private var currentNote: Note?
-    @State private var isKeyboardVisible = false
     
     init(authManager: AuthenticationManager, mode: Mode, content: String = "", existingNote: Note? = nil, onSave: @escaping (Note) -> Void) {
         self.authManager = authManager
@@ -27,13 +24,8 @@ struct NoteEditView: View {
         self._currentNote = State(initialValue: existingNote)
     }
     
-    // Add this computed property at the top level of the NoteEditView struct
     private var backgroundColor: Color {
-        if colorScheme == .dark {
-            return Color(red: 20/255, green: 21/255, blue: 28/255) // Even darker background for dark mode
-        } else {
-            return Color.white // Normal white for light mode
-        }
+        colorScheme == .dark ? Color(red: 20/255, green: 21/255, blue: 28/255) : Color.white
     }
     
     var body: some View {
@@ -44,12 +36,8 @@ struct NoteEditView: View {
                 if let note = currentNote, mode == .add {
                     NoteDetailView(note: note, onSave: onSave)
                 } else {
-                    TextEditor(text: $content)
-                        .font(.system(size: 16, weight: .regular, design: .monospaced))
+                    SimpleLargeTextEditor(text: $content)
                         .padding()
-                        .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                        .background(Color.clear)
-                        .focused($isTextFieldFocused)
                     
                     bottomBar
                 }
@@ -62,61 +50,18 @@ struct NoteEditView: View {
                     .font(.system(size: 17, weight: .regular, design: .monospaced))
             }
         }
-        .opacity(animateContent ? 1 : 0)
-        .offset(y: animateContent ? 0 : 20)
-        .animation(.easeOut(duration: 0.3), value: animateContent)
-        .onAppear {
-            animateContent = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                isTextFieldFocused = true
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            isKeyboardVisible = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            isKeyboardVisible = false
-        }
     }
     
     private var bottomBar: some View {
         HStack {
-            Text("\(content.count) chars / \(wordCount) words")
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
-                .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-            
             Spacer()
-            
-            if isKeyboardVisible {
-                hideKeyboardButton
-            }
-            
-            Spacer()
-            
             pasteButton
-            
             Spacer()
-            
             saveButton
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(Color.clear)
-    }
-    
-    private var hideKeyboardButton: some View {
-        Button(action: {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            isKeyboardVisible = false
-        }) {
-            HStack(spacing: 4) {
-                Image(systemName: "keyboard.chevron.compact.down")
-                    .font(.system(size: 16))
-                Text("Hide")
-                    .font(.system(size: 16, weight: .regular, design: .monospaced))
-            }
-            .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-        }
     }
     
     private var pasteButton: some View {
@@ -146,10 +91,9 @@ struct NoteEditView: View {
                 if existingNote.content != trimmedContent {
                     var updatedNote = existingNote
                     updatedNote.content = trimmedContent
-                    updatedNote.timestamp = Date() // Only update timestamp if content changed
+                    updatedNote.timestamp = Date()
                     onSave(updatedNote)
                 } else {
-                    // If content hasn't changed, just call onSave with the existing note
                     onSave(existingNote)
                 }
             }
@@ -164,8 +108,39 @@ struct NoteEditView: View {
         }
         .disabled(content.isEmpty)
     }
+}
+
+struct SimpleLargeTextEditor: UIViewRepresentable {
+    @Binding var text: String
     
-    private var wordCount: Int {
-        content.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.font = UIFont.monospacedSystemFont(ofSize: 16, weight: .regular)
+        textView.backgroundColor = .clear
+        textView.isScrollEnabled = true
+        textView.autocapitalizationType = .sentences
+        textView.autocorrectionType = .default
+        textView.spellCheckingType = .default
+        return textView
+    }
+    
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        uiView.text = text
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: SimpleLargeTextEditor
+        
+        init(_ parent: SimpleLargeTextEditor) {
+            self.parent = parent
+        }
+        
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
     }
 }

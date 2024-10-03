@@ -344,7 +344,7 @@ struct ContentView: View {
                           let isPinned = data["isPinned"] as? Bool else {
                         return nil
                     }
-                    return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId)
+                    return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId, syncState: .synced)
                 }
                 
                 DispatchQueue.main.async {
@@ -393,7 +393,8 @@ struct ContentView: View {
         guard let userId = authManager.user?.uid else { return }
         var trimmedNote = note
         trimmedNote.content = note.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        trimmedNote.userId = userId  // Add this line
+        trimmedNote.userId = userId
+        trimmedNote.syncState = .notSynced
         
         // Add to local Core Data
         let newNote = CDNote(context: viewContext)
@@ -403,6 +404,7 @@ struct ContentView: View {
         newNote.timestamp = trimmedNote.timestamp
         newNote.isPinned = trimmedNote.isPinned
         newNote.needsSync = true
+        newNote.syncStateEnum = trimmedNote.syncState
         
         do {
             try viewContext.save()
@@ -420,6 +422,10 @@ struct ContentView: View {
     private func syncNoteToFirebase(_ note: Note) {
         guard let userId = authManager.user?.uid else { return }
         let db = Firestore.firestore()
+        if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+            self.notes[index].syncState = .syncing
+        }
+        
         db.collection("users").document(userId).collection("notes").document(note.id).setData([
             "content": note.content,
             "timestamp": Timestamp(date: note.timestamp),
@@ -427,16 +433,24 @@ struct ContentView: View {
         ]) { error in
             if let error = error {
                 print("Error syncing note to Firebase: \(error.localizedDescription)")
+                if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+                    self.notes[index].syncState = .notSynced
+                }
             } else {
-                // Mark as synced in Core Data
+                if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+                    self.notes[index].syncState = .synced
+                }
+                
+                // Update Core Data
                 let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
                 fetchRequest.predicate = NSPredicate(format: "id == %@ AND userId == %@", note.id, userId)
                 
                 do {
-                    let results = try viewContext.fetch(fetchRequest)
+                    let results = try self.viewContext.fetch(fetchRequest)
                     if let existingNote = results.first {
                         existingNote.needsSync = false
-                        try viewContext.save()
+                        existingNote.syncStateEnum = note.syncState
+                        try self.viewContext.save()
                     }
                 } catch {
                     print("Error marking note as synced in Core Data: \(error)")
@@ -448,6 +462,7 @@ struct ContentView: View {
     private func updateNote(_ updatedNote: Note) {
         if let index = notes.firstIndex(where: { $0.id == updatedNote.id }) {
             notes[index] = updatedNote
+            notes[index].syncState = .notSynced
         }
         
         // Update in Core Data
@@ -461,6 +476,7 @@ struct ContentView: View {
                 existingNote.timestamp = updatedNote.timestamp
                 existingNote.isPinned = updatedNote.isPinned
                 existingNote.needsSync = true
+                existingNote.syncStateEnum = updatedNote.syncState
                 try viewContext.save()
             }
         } catch {
@@ -698,7 +714,7 @@ struct ContentView: View {
                           let isPinned = data["isPinned"] as? Bool else {
                         return nil
                     }
-                    return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId)
+                    return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId, syncState: .synced)
                 }
                 
                 DispatchQueue.main.async {
@@ -747,6 +763,7 @@ struct ContentView: View {
                     existingNote.isPinned = note.isPinned
                     existingNote.userId = note.userId
                     existingNote.needsSync = false
+                    existingNote.syncStateEnum = note.syncState
                 } else {
                     // Create new note
                     let newNote = CDNote(context: viewContext)
@@ -756,6 +773,7 @@ struct ContentView: View {
                     newNote.isPinned = note.isPinned
                     newNote.userId = note.userId
                     newNote.needsSync = false
+                    newNote.syncStateEnum = note.syncState
                 }
             } catch {
                 print("Error fetching note from Core Data: \(error)")
@@ -778,4 +796,3 @@ struct ContentView: View {
         }
     }
 }
-

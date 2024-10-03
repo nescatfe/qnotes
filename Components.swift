@@ -33,12 +33,19 @@ extension UserDefaults {
 }
 
 // Make Note conform to Hashable
+enum SyncState {
+    case notSynced
+    case syncing
+    case synced
+}
+
 struct Note: Identifiable, Equatable, Hashable {
     var id: String = UUID().uuidString
     var content: String
     var timestamp: Date
     var isPinned: Bool = false
     var userId: String
+    var syncState: SyncState = .notSynced
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -51,7 +58,8 @@ extension CDNote {
              content: self.content ?? "",
              timestamp: self.timestamp ?? Date(),
              isPinned: self.isPinned,
-             userId: self.userId ?? "")  // Add this line
+             userId: self.userId ?? "",
+             syncState: self.syncStateEnum)
     }
 }
 
@@ -71,12 +79,49 @@ struct NoteRowView: View {
                     .font(.system(size: 16, weight: .regular, design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                Text(formatDate(note.timestamp))
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+                HStack {
+                    Text(formatDate(note.timestamp))
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+                    syncStatusView
+                }
             }
         }
         .padding(.vertical, 4)
+    }
+    
+    private var syncStatusView: some View {
+        Text(syncStatusText)
+            .font(.system(size: 12, weight: .regular, design: .monospaced))
+            .foregroundColor(syncStatusColor)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(syncStatusColor.opacity(0.2))
+            )
+    }
+    
+    private var syncStatusText: String {
+        switch note.syncState {
+        case .notSynced:
+            return "Not synced"
+        case .syncing:
+            return "Syncing"
+        case .synced:
+            return "Synced"
+        }
+    }
+    
+    private var syncStatusColor: Color {
+        switch note.syncState {
+        case .notSynced:
+            return .draculaPink
+        case .syncing:
+            return .draculaYellow
+        case .synced:
+            return .draculaGreen
+        }
     }
     
     private func formatDate(_ date: Date) -> String {

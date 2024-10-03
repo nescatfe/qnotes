@@ -27,7 +27,7 @@ struct PersistenceController {
             newNote.content = "Sample note \(i + 1)"
             newNote.timestamp = Date()
             newNote.isPinned = i == 0
-            newNote.needsSync = false
+//            newNote.needsSync = false
         }
         do {
             try viewContext.save()
