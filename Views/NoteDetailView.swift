@@ -24,9 +24,18 @@ struct NoteDetailView: View {
         self.onSave = onSave
     }
     
+    // Add this computed property at the top level of the NoteDetailView struct
+    private var backgroundColor: Color {
+        if colorScheme == .dark {
+            return Color(red: 20/255, green: 21/255, blue: 28/255) // Even darker background for dark mode
+        } else {
+            return Color.white // Normal white for light mode
+        }
+    }
+    
     var body: some View {
         ZStack {
-            colorScheme == .dark ? Color.draculaBackground.ignoresSafeArea() : Color(.systemBackground).ignoresSafeArea()
+            backgroundColor.ignoresSafeArea()
             
             VStack(spacing: 0) {
                 if isLoading {
@@ -268,6 +277,15 @@ struct NoteEditView: View {
         self._currentNote = State(initialValue: existingNote)
     }
     
+    // Add this computed property at the top level of the NoteEditView struct
+    private var backgroundColor: Color {
+        if colorScheme == .dark {
+            return Color(red: 20/255, green: 21/255, blue: 28/255) // Even darker background for dark mode
+        } else {
+            return Color.white // Normal white for light mode
+        }
+    }
+    
     var body: some View {
         ZStack {
             backgroundColor.edgesIgnoringSafeArea(.all)
@@ -309,10 +327,6 @@ struct NoteEditView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             isKeyboardVisible = false
         }
-    }
-    
-    private var backgroundColor: Color {
-        colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground)
     }
     
     private var bottomBar: some View {

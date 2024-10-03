@@ -17,6 +17,14 @@ struct SettingsView: View {
     @Binding var notes: [Note]
     @State private var userProfileImageURL: URL?
     
+    private var backgroundColor: Color {
+        if colorScheme == .dark {
+            return Color(red: 20/255, green: 21/255, blue: 28/255) // Even darker background for dark mode
+        } else {
+            return Color.white // Normal white for light mode
+        }
+    }
+
     var body: some View {
         List {
             Section {
@@ -45,7 +53,7 @@ struct SettingsView: View {
             }
         }
         .listStyle(InsetGroupedListStyle())
-        .background(colorScheme == .dark ? Color.draculaBackground : Color(.systemGroupedBackground))
+        .background(backgroundColor)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
         .alert("Delete All Unpinned Notes", isPresented: $showingDeleteConfirmation) {

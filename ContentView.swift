@@ -137,7 +137,7 @@ struct ContentView: View {
                     addButton
                 }
             }
-            .background(colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground))
+            .background(backgroundColor)
             .navigationDestination(isPresented: $isAddingNewNote) {
                 NoteEditView(authManager: authManager, mode: .add) { newNote in
                     addNote(newNote)
@@ -241,7 +241,7 @@ struct ContentView: View {
                         NavigationLink(value: note) {
                             NoteRowView(note: note)
                         }
-                        .listRowBackground(colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground))
+                        .listRowBackground(backgroundColor)
                         .swipeActions(edge: .trailing) {
                             if !note.isPinned {
                                 Button(role: .destructive) {
@@ -303,7 +303,7 @@ struct ContentView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(colorScheme == .dark ? Color.draculaBackground : Color(.systemBackground))
+        .background(backgroundColor)
     }
     
     private var addButton: some View {
@@ -807,6 +807,14 @@ struct ContentView: View {
             try viewContext.save()
         } catch {
             print("Error saving notes to Core Data: \(error)")
+        }
+    }
+    
+    private var backgroundColor: Color {
+        if colorScheme == .dark {
+            return Color(red: 20/255, green: 21/255, blue: 28/255) // Even darker background for dark mode
+        } else {
+            return Color.white // Normal white for light mode
         }
     }
 }
