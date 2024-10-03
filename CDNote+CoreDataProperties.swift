@@ -2,7 +2,7 @@
 //  CDNote+CoreDataProperties.swift
 //  Qnote
 //
-//  Created by coolskyz on 02/10/24.
+//  Created by coolskyz on 03/10/24.
 //
 //
 
