@@ -93,7 +93,7 @@ struct ContentView: View {
                     userProfileButton
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    uploadButton
+                    // uploadButton has been removed from here
                     refreshButton
                     addButton
                 }
@@ -386,12 +386,14 @@ struct ContentView: View {
     private func addNote(_ note: Note) {
         notes.insert(note, at: 0)
         saveNoteToCoreData(note)
+        syncNoteToFirebase(note)
     }
     
     private func updateNote(_ updatedNote: Note) {
         if let index = notes.firstIndex(where: { $0.id == updatedNote.id }) {
             notes[index] = updatedNote
             saveNoteToCoreData(updatedNote)
+            syncNoteToFirebase(updatedNote)
         }
     }
     
@@ -442,29 +444,10 @@ struct ContentView: View {
     private func syncPendingChanges() {
         guard connectivityManager.isConnected, let userId = authManager.user?.uid else { return }
         
-        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "needsSync == true AND userId == %@", userId)
+        let notesToSync = notes.filter { $0.needsSync || $0.syncState == .notSynced }
         
-        do {
-            let notesToSync = try viewContext.fetch(fetchRequest)
-            for cdNote in notesToSync {
-                let note = cdNote.toNote()
-                uploadNoteToFirebase(note) { success in
-                    if success {
-                        DispatchQueue.main.async {
-                            cdNote.needsSync = false
-                            cdNote.syncStateEnum = .synced
-                            do {
-                                try self.viewContext.save()
-                            } catch {
-                                print("Error saving Core Data context: \(error)")
-                            }
-                        }
-                    }
-                }
-            }
-        } catch {
-            print("Error fetching notes to sync: \(error)")
+        for note in notesToSync {
+            syncNoteToFirebase(note)
         }
         
         // Sync deleted notes
@@ -663,55 +646,72 @@ struct ContentView: View {
         }
     }
     
-    private var uploadButton: some View {
-        Button(action: {
-            uploadAllLocalNotes()
-        }) {
-            Image(systemName: "icloud.and.arrow.up")
-                .font(.system(size: 18))
-                .foregroundColor(connectivityManager.isConnected ? 
-                    (colorScheme == .dark ? .draculaPurple : .draculaPurple) : 
-                    .gray)
-        }
-        .disabled(!connectivityManager.isConnected || isUploading)
-        .overlay(
-            Group {
-                if isUploading {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                        .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
+    private func syncNotesToCoreData(_ fetchedNotes: [Note]) {
+        for note in fetchedNotes {
+            let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id == %@", note.id)
+            
+            do {
+                let results = try viewContext.fetch(fetchRequest)
+                if let existingNote = results.first {
+                    // Update existing note
+                    existingNote.content = note.content
+                    existingNote.timestamp = note.timestamp
+                    existingNote.isPinned = note.isPinned
+                    existingNote.userId = note.userId
+                    existingNote.needsSync = false
+                    existingNote.syncStateEnum = note.syncState
+                } else {
+                    // Create new note
+                    let newNote = CDNote(context: viewContext)
+                    newNote.id = note.id
+                    newNote.content = note.content
+                    newNote.timestamp = note.timestamp
+                    newNote.isPinned = note.isPinned
+                    newNote.userId = note.userId
+                    newNote.needsSync = false
+                    newNote.syncStateEnum = note.syncState
                 }
+            } catch {
+                print("Error fetching note from Core Data: \(error)")
             }
-        )
+        }
+        
+        // Save changes
+        do {
+            try viewContext.save()
+        } catch {
+            print("Error saving notes to Core Data: \(error)")
+        }
     }
     
-    private func uploadAllLocalNotes() {
+    private func syncNoteToFirebase(_ note: Note) {
         guard connectivityManager.isConnected else {
-            // Show an alert that upload is not available offline
+            // If not connected, mark the note for future sync
+            markNoteForSync(note)
             return
         }
         
-        isUploading = true
-        
-        let localNotes = notes.filter { $0.syncState != .synced }
-        let group = DispatchGroup()
-        
-        for note in localNotes {
-            group.enter()
-            uploadNoteToFirebase(note) { success in
-                if success {
+        uploadNoteToFirebase(note) { success in
+            if success {
+                DispatchQueue.main.async {
                     if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
                         self.notes[index].syncState = .synced
                         self.updateNoteInCoreData(self.notes[index])
                     }
                 }
-                group.leave()
+            } else {
+                // If upload fails, mark the note for future sync
+                self.markNoteForSync(note)
             }
         }
-        
-        group.notify(queue: .main) {
-            self.isUploading = false
-            // Optionally show a completion message
+    }
+    
+    private func markNoteForSync(_ note: Note) {
+        if let index = notes.firstIndex(where: { $0.id == note.id }) {
+            notes[index].syncState = .notSynced
+            notes[index].needsSync = true
+            updateNoteInCoreData(notes[index])
         }
     }
     
@@ -785,45 +785,6 @@ struct ContentView: View {
             } else {
                 completion(true)
             }
-        }
-    }
-    
-    private func syncNotesToCoreData(_ fetchedNotes: [Note]) {
-        for note in fetchedNotes {
-            let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", note.id)
-            
-            do {
-                let results = try viewContext.fetch(fetchRequest)
-                if let existingNote = results.first {
-                    // Update existing note
-                    existingNote.content = note.content
-                    existingNote.timestamp = note.timestamp
-                    existingNote.isPinned = note.isPinned
-                    existingNote.userId = note.userId
-                    existingNote.needsSync = false
-                    existingNote.syncStateEnum = note.syncState
-                } else {
-                    // Create new note
-                    let newNote = CDNote(context: viewContext)
-                    newNote.id = note.id
-                    newNote.content = note.content
-                    newNote.timestamp = note.timestamp
-                    newNote.isPinned = note.isPinned
-                    newNote.userId = note.userId
-                    newNote.needsSync = false
-                    newNote.syncStateEnum = note.syncState
-                }
-            } catch {
-                print("Error fetching note from Core Data: \(error)")
-            }
-        }
-        
-        // Save changes
-        do {
-            try viewContext.save()
-        } catch {
-            print("Error saving notes to Core Data: \(error)")
         }
     }
 }
