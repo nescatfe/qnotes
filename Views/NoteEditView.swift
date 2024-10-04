@@ -64,7 +64,11 @@ struct NoteEditView: View {
     
     private var saveButton: some View {
         Button(action: {
-            saveNote()
+            if mode == .add {
+                createNewNote()
+            } else {
+                editExistingNote()
+            }
         }) {
             HStack(spacing: 4) {
                 Image(systemName: mode == .add ? "square.and.arrow.down" : "checkmark")
@@ -83,24 +87,34 @@ struct NoteEditView: View {
         .disabled(!isContentValid || isSaving)
     }
     
-    private func saveNote() {
+    private func createNewNote() {
         let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedContent.isEmpty {
             isSaving = true
             DispatchQueue.global(qos: .userInitiated).async {
-                let newNote: Note
-                if mode == .add {
-                    newNote = Note(content: trimmedContent, timestamp: Date(), userId: authManager.user?.uid ?? "")
-                } else if let existingNote = currentNote {
-                    newNote = Note(id: existingNote.id, content: trimmedContent, timestamp: Date(), isPinned: existingNote.isPinned, userId: existingNote.userId, syncState: .notSynced)
-                } else {
-                    return
-                }
+                let newNote = Note(content: trimmedContent, timestamp: Date(), userId: authManager.user?.uid ?? "")
                 
                 DispatchQueue.main.async {
                     onSave(newNote)
                     isSaving = false
                     presentationMode.wrappedValue.dismiss()
+                }
+            }
+        }
+    }
+    
+    private func editExistingNote() {
+        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedContent.isEmpty, let existingNote = currentNote {
+            isSaving = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                let updatedNote = Note(id: existingNote.id, content: trimmedContent, timestamp: Date(), isPinned: existingNote.isPinned, userId: existingNote.userId, syncState: .notSynced)
+                
+                DispatchQueue.main.async {
+                    onSave(updatedNote)
+                    isSaving = false
+                    self.content = trimmedContent
+                    self.currentNote = updatedNote
                 }
             }
         }
@@ -144,22 +158,14 @@ struct SimpleLargeTextEditor: UIViewRepresentable {
     
     class Coordinator: NSObject, UITextViewDelegate {
         var parent: SimpleLargeTextEditor
-        private var debounceWorkItem: DispatchWorkItem?
         
         init(_ parent: SimpleLargeTextEditor) {
             self.parent = parent
         }
         
         func textViewDidChange(_ textView: UITextView) {
-            debounceWorkItem?.cancel()
-            
-            let workItem = DispatchWorkItem { [weak self] in
-                self?.parent.text = textView.text
-                self?.updateContentValidity(textView)
-            }
-            
-            debounceWorkItem = workItem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
+            parent.text = textView.text
+            updateContentValidity(textView)
         }
         
         func updateContentValidity(_ textView: UITextView) {

@@ -39,13 +39,11 @@ struct NoteDetailView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if isEditing {
                     NoteEditView(authManager: AuthenticationManager(), mode: .edit, content: editedContent, existingNote: note) { updatedNote in
-                        if updatedNote.content != self.note.content {
-                            self.note = updatedNote
-                            self.editedContent = updatedNote.content
-                            self.onSave(updatedNote)
-                        }
+                        self.note = updatedNote
+                        self.editedContent = updatedNote.content
+                        self.onSave(updatedNote)
                         self.isEditing = false
-                        self.loadNoteContent()
+                        // No need to call loadNoteContent() here as we're staying on the same view
                     }
                 } else {
                     noteContentView
@@ -201,7 +199,7 @@ struct NoteDetailView: View {
             withAnimation {
                 isEditing = false
                 isSaving = false
-                loadNoteContent() // Reload content to reflect changes
+                // No need to call loadNoteContent() here as we're staying on the same view
             }
         }
     }
