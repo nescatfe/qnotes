@@ -15,6 +15,7 @@ extension Color {
     static let draculaGreen = Color(red: 80/255, green: 250/255, blue: 123/255)
     static let draculaPink = Color(red: 255/255, green: 121/255, blue: 198/255)
     static let draculaYellow = Color(red: 241/255, green: 250/255, blue: 140/255)
+    static let draculaOrange = Color(red: 255/255, green: 184/255, blue: 108/255) // Add this line
 }
 
 // Add this extension to handle UserDefaults

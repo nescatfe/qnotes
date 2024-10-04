@@ -166,6 +166,18 @@ struct SettingsView: View {
                 Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown")
                     .foregroundColor(.gray)
             }
+            
+            NavigationLink {
+                BuyMeCoffeeView()
+            } label: {
+                HStack {
+                    Image(systemName: "cup.and.saucer.fill")
+                        .foregroundColor(.draculaOrange)
+                        .frame(width: 30)
+                    Text("Buy Me a Coffee")
+                    Spacer()
+                }
+            }
         }
         .font(.system(size: 16, weight: .regular, design: .monospaced))
     }

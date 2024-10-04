@@ -11,7 +11,7 @@ import GoogleSignIn
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
-                       didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         FirebaseApp.configure()
         return true
     }
@@ -29,11 +29,28 @@ struct QnoteApp: App {
     @StateObject private var authManager = AuthenticationManager()
     let persistenceController = PersistenceController.shared
     
+    @State private var isShowingLaunchScreen = true
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(authManager)
-                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+            ZStack {
+                ContentView()
+                    .environmentObject(authManager)
+                    .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                
+                if isShowingLaunchScreen {
+                    LaunchScreenView()
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
+            }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { // Changed from 2 to 1
+                    withAnimation {
+                        isShowingLaunchScreen = false
+                    }
+                }
+            }
         }
     }
 }
