@@ -12,6 +12,7 @@ import CoreData
 import Network
 import Combine
 import SDWebImageSwiftUI
+import UIKit
 
 class ConnectivityManager: ObservableObject {
     @Published var isConnected = false
@@ -60,6 +61,10 @@ struct ContentView: View {
     @State private var hasMoreNotes = true
     private let notesPerPage = 20
     @State private var isUploading = false
+    @State private var showingPasteAlert = false
+    @State private var clipboardContent: String = ""
+    @State private var showingErrorAlert = false
+    @State private var errorMessage = ""
     
     var body: some View {
         Group {
@@ -93,7 +98,7 @@ struct ContentView: View {
                     userProfileButton
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    // uploadButton has been removed from here
+                    pasteButton
                     refreshButton
                     addButton
                 }
@@ -107,6 +112,21 @@ struct ContentView: View {
             .navigationDestination(for: Note.self) { note in
                 NoteDetailView(note: note, onSave: updateNote)
             }
+            .alert(isPresented: $showingPasteAlert) {
+                Alert(
+                    title: Text("Create Note from Clipboard"),
+                    message: Text("Do you want to create a new note from the clipboard content?"),
+                    primaryButton: .default(Text("Create")) {
+                        createNoteFromClipboard()
+                    },
+                    secondaryButton: .cancel()
+                )
+            }
+            .alert("Error", isPresented: $showingErrorAlert, actions: {
+                Button("OK", role: .cancel) {}
+            }, message: {
+                Text(errorMessage)
+            })
         }
         .environment(\.font, .system(.body, design: .monospaced))
         .tint(colorScheme == .dark ? .draculaForeground : .primary)
@@ -703,6 +723,10 @@ struct ContentView: View {
             } else {
                 // If upload fails, mark the note for future sync
                 self.markNoteForSync(note)
+                DispatchQueue.main.async {
+                    self.errorMessage = "Failed to sync note with Firebase. It will be synced when connection is available."
+                    self.showingErrorAlert = true
+                }
             }
         }
     }
@@ -760,6 +784,8 @@ struct ContentView: View {
             try viewContext.save()
         } catch {
             print("Error saving note to Core Data: \(error)")
+            errorMessage = "Failed to save note: \(error.localizedDescription)"
+            showingErrorAlert = true
         }
     }
     
@@ -786,5 +812,41 @@ struct ContentView: View {
                 completion(true)
             }
         }
+    }
+    
+    private var pasteButton: some View {
+        Button(action: {
+            checkClipboardAndShowAlert()
+        }) {
+            Image(systemName: "doc.on.clipboard")
+                .font(.system(size: 18))
+                .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+        }
+    }
+    
+    private func checkClipboardAndShowAlert() {
+        if let content = UIPasteboard.general.string, !content.isEmpty {
+            showingPasteAlert = true
+        } else {
+            errorMessage = "The clipboard is empty or its content cannot be accessed."
+            showingErrorAlert = true
+        }
+    }
+    
+    private func createNoteFromClipboard() {
+        guard let content = UIPasteboard.general.string, !content.isEmpty else {
+            errorMessage = "Failed to create note: The clipboard is empty or its content cannot be accessed."
+            showingErrorAlert = true
+            return
+        }
+        
+        guard let userId = authManager.user?.uid else {
+            errorMessage = "Failed to create note: User ID is not available."
+            showingErrorAlert = true
+            return
+        }
+        
+        let newNote = Note(content: content, timestamp: Date(), userId: userId)
+        addNote(newNote)
     }
 }
