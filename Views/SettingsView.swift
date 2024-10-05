@@ -16,6 +16,8 @@ struct SettingsView: View {
     @Environment(\.presentationMode) var presentationMode
     @Binding var notes: [Note]
     @State private var userProfileImageURL: URL?
+    @State private var showingAllNotes = false
+    @State private var showingDeleteAllNotesConfirmation = false
     
     private var backgroundColor: Color {
         if colorScheme == .dark {
@@ -45,10 +47,12 @@ struct SettingsView: View {
             }
             
             Section {
-                deleteUnpinnedNotesButton
+                allNotesButton
+                deleteAllNotesButton
             }
             
             Section {
+                deleteUnpinnedNotesButton
                 logoutButton
             }
         }
@@ -79,6 +83,17 @@ struct SettingsView: View {
             }
         } message: {
             Text("aRe yOu SoOoerr?")
+        }
+        .alert("Delete All Notes", isPresented: $showingDeleteAllNotesConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteAllNotes()
+            }
+        } message: {
+            Text("This will delete all notes from your device. This action cannot be undone. Are you sure?")
+        }
+        .sheet(isPresented: $showingAllNotes) {
+            AllNotesView()
         }
     }
     
@@ -264,15 +279,102 @@ struct SettingsView: View {
             showingLogoutConfirmation = true
         }) {
             HStack {
-                Spacer()
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                    .foregroundColor(.red)
+                    .frame(width: 30)
                 Text("Log Out")
-                    .foregroundColor(.white)
-                Spacer()
+                    .foregroundColor(.red)
             }
         }
-        .padding()
-        .background(connectivityManager.isConnected ? Color.red : Color.gray)
-        .cornerRadius(10)
+        .font(.system(size: 16, weight: .regular, design: .monospaced))
         .disabled(!connectivityManager.isConnected)
+    }
+    
+    private var allNotesButton: some View {
+        Button(action: {
+            showingAllNotes = true
+        }) {
+            HStack {
+                Image(systemName: "list.bullet")
+                    .foregroundColor(.draculaPurple)
+                    .frame(width: 30)
+                Text("View All Notes")
+                Spacer()
+                Text("\(notes.count)")
+                    .foregroundColor(.gray)
+            }
+        }
+        .font(.system(size: 16, weight: .regular, design: .monospaced))
+    }
+    
+    private var deleteAllNotesButton: some View {
+        Button(action: {
+            showingDeleteAllNotesConfirmation = true
+        }) {
+            HStack {
+                Image(systemName: "trash.fill")
+                    .foregroundColor(.red)
+                    .frame(width: 30)
+                Text("Delete All Notes")
+                    .foregroundColor(.red)
+            }
+        }
+        .font(.system(size: 16, weight: .regular, design: .monospaced))
+    }
+
+    private func deleteAllNotes() {
+        let fetchRequest: NSFetchRequest<NSFetchRequestResult> = CDNote.fetchRequest()
+        let batchDeleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+
+        do {
+            try viewContext.execute(batchDeleteRequest)
+            try viewContext.save()
+
+            // Update the notes array in the parent view
+            notes.removeAll()
+
+            // Dismiss the settings view and return to the main page
+            presentationMode.wrappedValue.dismiss()
+        } catch {
+            print("Error deleting all notes from Core Data: \(error)")
+        }
+    }
+}
+
+struct AllNotesView: View {
+    @Environment(\.managedObjectContext) private var viewContext
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(keyPath: \CDNote.timestamp, ascending: false)],
+        animation: .default)
+    private var cdNotes: FetchedResults<CDNote>
+    
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(cdNotes) { cdNote in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(cdNote.content ?? "")
+                            .lineLimit(2)
+                            .font(.system(size: 16, weight: .regular, design: .monospaced))
+                        Text(formatDate(cdNote.timestamp ?? Date()))
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundColor(.gray)
+                        Text("ID: \(cdNote.id ?? "Unknown")")
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundColor(.draculaComment)
+                        Text("User ID: \(cdNote.userId ?? "Unknown")")
+                            .font(.system(size: 12, weight: .regular, design: .monospaced))
+                            .foregroundColor(.draculaComment)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .navigationTitle("All Notes")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        DateFormatter.noteListFormatter.string(from: date)
     }
 }

@@ -132,6 +132,7 @@ struct SimpleLargeTextEditor: UIViewRepresentable {
         textView.isScrollEnabled = true
         textView.delegate = context.coordinator
         
+        // Optimize for large content
         textView.layoutManager.allowsNonContiguousLayout = true
         textView.textContainer.lineFragmentPadding = 0
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
@@ -140,6 +141,11 @@ struct SimpleLargeTextEditor: UIViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.dataDetectorTypes = []
+        
+        // Disable unnecessary features for better performance
+        textView.autocorrectionType = .no
+        textView.autocapitalizationType = .none
+        textView.spellCheckingType = .no
         
         return textView
     }
@@ -158,14 +164,18 @@ struct SimpleLargeTextEditor: UIViewRepresentable {
     
     class Coordinator: NSObject, UITextViewDelegate {
         var parent: SimpleLargeTextEditor
+        var debounceTimer: Timer?
         
         init(_ parent: SimpleLargeTextEditor) {
             self.parent = parent
         }
         
         func textViewDidChange(_ textView: UITextView) {
-            parent.text = textView.text
-            updateContentValidity(textView)
+            debounceTimer?.invalidate()
+            debounceTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
+                self.parent.text = textView.text
+                self.updateContentValidity(textView)
+            }
         }
         
         func updateContentValidity(_ textView: UITextView) {

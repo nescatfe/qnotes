@@ -44,6 +44,9 @@ struct ContentView: View {
     @StateObject private var connectivityManager = ConnectivityManager()
     @State private var notes: [Note] = []
     @State private var searchText = ""
+    @State private var isSearching = false
+    @State private var searchResults: [Note] = []
+    @State private var searchCancellable: AnyCancellable?
     @State private var showingDeleteConfirmation = false
     @State private var noteToDelete: Note?
     @State private var animateList = false
@@ -149,6 +152,7 @@ struct ContentView: View {
     
     private func onAuthenticatedAppear() {
         setNavigationBarFont()
+        cleanupDeletedNotes() // Add this line
         fetchNotes()
         withAnimation(.easeOut(duration: 0.3)) {
             animateList = true
@@ -180,29 +184,26 @@ struct ContentView: View {
     }
     
     private var searchBar: some View {
-        HStack {
-            TextField("Search notes", text: $searchText)
-                .font(.system(size: 16, weight: .regular, design: .monospaced))
-                .padding(10)
-                .background(colorScheme == .dark ? Color.draculaComment.opacity(0.3) : Color(.systemGray6))
-                .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                .cornerRadius(8)
-            
-            if !searchText.isEmpty {
-                Button(action: {
-                    searchText = ""
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-                }
-                .padding(.trailing, 8)
-                .transition(.opacity)
-                .animation(.easeInOut, value: searchText)
-            }
+        SearchBarView(
+            searchText: $searchText,
+            isSearching: $isSearching,
+            performSearch: performSearch,
+            clearSearch: clearSearch
+        )
+    }
+    
+    private func performSearch() {
+        isSearching = true
+        searchResults = notes.filter { note in
+            note.content.lowercased().contains(searchText.lowercased())
         }
-        .padding(.horizontal)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    
+    private func clearSearch() {
+        searchText = ""
+        isSearching = false
+        searchResults = []
     }
     
     private var notesList: some View {
@@ -211,9 +212,9 @@ struct ContentView: View {
                 emptyNotesView
             } else {
                 List {
-                    ForEach(filteredNotes) { note in
+                    ForEach(isSearching ? searchResults : filteredNotes) { note in
                         NavigationLink(value: note) {
-                            NoteRowView(note: note)
+                            NoteRowView(note: note, isRefreshing: isRefreshing)
                         }
                         .listRowBackground(backgroundColor)
                         .swipeActions(edge: .trailing) {
@@ -237,7 +238,7 @@ struct ContentView: View {
                         }
                     }
                     
-                    if hasMoreNotes {
+                    if hasMoreNotes && !isSearching {
                         ProgressView()
                             .onAppear {
                                 loadMoreNotes()
@@ -289,19 +290,11 @@ struct ContentView: View {
     }
     
     private var filteredNotes: [Note] {
-        if notes.isEmpty {
-            return []
-        }
-        let sorted = notes.sorted { 
+        notes.sorted { 
             if $0.isPinned == $1.isPinned {
                 return $0.timestamp > $1.timestamp
             }
             return $0.isPinned && !$1.isPinned
-        }
-        if searchText.isEmpty {
-            return sorted
-        } else {
-            return sorted.filter { $0.content.lowercased().contains(searchText.lowercased()) }
         }
     }
     
@@ -310,10 +303,27 @@ struct ContentView: View {
         currentPage = 1
         hasMoreNotes = true
         
-        if connectivityManager.isConnected {
-            fetchNotesFromFirebase(page: currentPage)
-        } else {
-            fetchNotesFromCoreData(page: currentPage)
+        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "userId == %@", authManager.user?.uid ?? "")
+        fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \CDNote.timestamp, ascending: false)]
+        fetchRequest.fetchLimit = notesPerPage
+        
+        do {
+            let fetchedCDNotes = try viewContext.fetch(fetchRequest)
+            let fetchedNotes = fetchedCDNotes.map { $0.toNote() }
+            
+            DispatchQueue.main.async {
+                self.notes = fetchedNotes
+                self.isLoading = false
+                self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+            }
+        } catch {
+            print("Error fetching notes: \(error)")
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.errorMessage = "Failed to fetch notes: \(error.localizedDescription)"
+                self.showingErrorAlert = true
+            }
         }
     }
     
@@ -406,14 +416,25 @@ struct ContentView: View {
     private func addNote(_ note: Note) {
         notes.insert(note, at: 0)
         saveNoteToCoreData(note)
-        syncNoteToFirebase(note)
+        if note.content.count <= 800000 {
+            syncNote(note)
+        } else {
+            print("New note exceeds 800,000 characters. Keeping it local only.")
+        }
     }
     
     private func updateNote(_ updatedNote: Note) {
         if let index = notes.firstIndex(where: { $0.id == updatedNote.id }) {
             notes[index] = updatedNote
             saveNoteToCoreData(updatedNote)
-            syncNoteToFirebase(updatedNote)
+            if updatedNote.content.count <= 800000 {
+                syncNote(updatedNote)
+            } else {
+                print("Updated note exceeds 800,000 characters. Keeping it local only.")
+                notes[index].syncState = .notSynced
+                notes[index].needsSync = false
+                updateNoteInCoreData(notes[index])
+            }
         }
     }
     
@@ -467,7 +488,7 @@ struct ContentView: View {
         let notesToSync = notes.filter { $0.needsSync || $0.syncState == .notSynced }
         
         for note in notesToSync {
-            syncNoteToFirebase(note)
+            syncNote(note)
         }
         
         // Sync deleted notes
@@ -667,13 +688,20 @@ struct ContentView: View {
     }
     
     private func syncNotesToCoreData(_ fetchedNotes: [Note]) {
-        for note in fetchedNotes {
-            let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-            fetchRequest.predicate = NSPredicate(format: "id == %@", note.id)
+    // Create a background context
+    let backgroundContext = PersistenceController.shared.container.newBackgroundContext()
+    
+    backgroundContext.performAndWait {
+        // Fetch all existing notes at once
+        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "id IN %@", fetchedNotes.map { $0.id })
+        
+        do {
+            let existingNotes = try backgroundContext.fetch(fetchRequest)
+            let existingNoteDict = Dictionary(uniqueKeysWithValues: existingNotes.map { ($0.id!, $0) })
             
-            do {
-                let results = try viewContext.fetch(fetchRequest)
-                if let existingNote = results.first {
+            for note in fetchedNotes {
+                if let existingNote = existingNoteDict[note.id] {
                     // Update existing note
                     existingNote.content = note.content
                     existingNote.timestamp = note.timestamp
@@ -683,7 +711,7 @@ struct ContentView: View {
                     existingNote.syncStateEnum = note.syncState
                 } else {
                     // Create new note
-                    let newNote = CDNote(context: viewContext)
+                    let newNote = CDNote(context: backgroundContext)
                     newNote.id = note.id
                     newNote.content = note.content
                     newNote.timestamp = note.timestamp
@@ -692,22 +720,28 @@ struct ContentView: View {
                     newNote.needsSync = false
                     newNote.syncStateEnum = note.syncState
                 }
-            } catch {
-                print("Error fetching note from Core Data: \(error)")
             }
-        }
-        
-        // Save changes
-        do {
-            try viewContext.save()
+            
+            // Save changes
+            try backgroundContext.save()
         } catch {
-            print("Error saving notes to Core Data: \(error)")
+            print("Error syncing notes to Core Data: \(error)")
         }
     }
+}
     
-    private func syncNoteToFirebase(_ note: Note) {
-        guard connectivityManager.isConnected else {
-            // If not connected, mark the note for future sync
+    private func syncNote(_ note: Note) {
+        guard note.content.count <= 800000 else {
+            print("Note exceeds 800,000 characters. Keeping it local only.")
+            if let index = notes.firstIndex(where: { $0.id == note.id }) {
+                notes[index].syncState = .notSynced
+                notes[index].needsSync = false // Mark as not needing sync since it's too large
+                updateNoteInCoreData(notes[index])
+            }
+            return
+        }
+        
+        if !connectivityManager.isConnected {
             markNoteForSync(note)
             return
         }
@@ -734,7 +768,7 @@ struct ContentView: View {
     private func markNoteForSync(_ note: Note) {
         if let index = notes.firstIndex(where: { $0.id == note.id }) {
             notes[index].syncState = .notSynced
-            notes[index].needsSync = true
+            notes[index].needsSync = note.content.count <= 800000 // Only mark for sync if within character limit
             updateNoteInCoreData(notes[index])
         }
     }
@@ -848,5 +882,30 @@ struct ContentView: View {
         
         let newNote = Note(content: content, timestamp: Date(), userId: userId)
         addNote(newNote)
+    }
+    
+    private func cleanupDeletedNotes() {
+        guard let userId = authManager.user?.uid else { return }
+        
+        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "userId == %@", userId)
+        
+        do {
+            let allNotes = try viewContext.fetch(fetchRequest)
+            let deletedNoteIds = UserDefaults.standard.deletedNoteIds()
+            
+            for note in allNotes {
+                if deletedNoteIds.contains(note.id ?? "") {
+                    viewContext.delete(note)
+                }
+            }
+            
+            try viewContext.save()
+            
+            // Clear the deletedNoteIds after cleanup
+            UserDefaults.standard.setDeletedNoteIds(Set<String>())
+        } catch {
+            print("Error cleaning up deleted notes: \(error)")
+        }
     }
 }
