@@ -70,28 +70,42 @@ struct NoteRowView: View {
     let isRefreshing: Bool
     
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(note.content.prefix(100).trimmingCharacters(in: .whitespacesAndNewlines))
-                    .lineLimit(2)
-                    .font(.system(size: 16, weight: .regular, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-                HStack(spacing: 4) {
-                    Text(formatDate(note.timestamp))
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-                    syncStatusView
-                    if note.isPinned {
-                        pinnedIndicator
-                    }
-                    Spacer()
+        VStack(alignment: .leading, spacing: 8) {
+            Text(note.content.prefix(100).trimmingCharacters(in: .whitespacesAndNewlines))
+                .lineLimit(2)
+                .font(.system(size: 16, weight: .regular, design: .monospaced))
+                .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+            
+            HStack(spacing: 8) {
+                Text(formatDate(note.timestamp))
+                    .font(.system(size: 12, weight: .regular, design: .monospaced))
+                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+                syncStatusView
+                if note.isPinned {
+                    pinnedIndicator
                 }
+                Spacer()
             }
         }
-        .padding(.vertical, 4)
-        .background(note.isPinned ? (colorScheme == .dark ? Color.draculaBackground.opacity(0.3) : Color.draculaOrange.opacity(0.1)) : Color.clear)
-        .cornerRadius(8)
+        .padding(16)
+        .background(noteBackground)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(note.isPinned ? pinnedBorderColor : Color.gray.opacity(0.2), lineWidth: note.isPinned ? 2 : 1)
+        )
+        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 2)
+    }
+    
+    private var noteBackground: some View {
+        RoundedRectangle(cornerRadius: 12)
+            .fill(note.isPinned ? 
+                  (colorScheme == .dark ? Color.draculaBackground.opacity(0.3) : Color.draculaOrange.opacity(0.1)) : 
+                  (colorScheme == .dark ? Color.draculaBackground.opacity(0.1) : Color.white))
+    }
+    
+    private var pinnedBorderColor: Color {
+        colorScheme == .dark ? .draculaOrange : .draculaOrange.opacity(0.6)
     }
     
     private var pinnedIndicator: some View {
@@ -180,22 +194,22 @@ struct SearchBarView: View {
     
     var body: some View {
         HStack {
-            TextField("Search notes", text: $searchText)
-                .font(.system(size: 16, weight: .regular, design: .monospaced))
-                .padding(10)
-                .background(Color(.systemGray6))
-                .cornerRadius(8)
-                .onSubmit(performSearch)
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.gray)
+                TextField("Search notes", text: $searchText)
+                    .font(.system(size: 16, weight: .regular, design: .monospaced))
+            }
+            .padding(10)
+            .background(Color(.systemGray6))
+            .cornerRadius(8)
+            .onSubmit(performSearch)
             
             if !searchText.isEmpty {
                 Button(action: clearSearch) {
-                    Text("Close")
+                    Text("Clear")
                         .font(.system(size: 14, weight: .medium, design: .monospaced))
                         .foregroundColor(.draculaPurple)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.draculaPurple.opacity(0.1))
-                        .cornerRadius(4)
                 }
                 .transition(.opacity)
                 .animation(.easeInOut, value: searchText)
@@ -206,5 +220,3 @@ struct SearchBarView: View {
         .padding(.bottom, 4)
     }
 }
-
-

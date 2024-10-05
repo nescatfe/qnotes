@@ -90,9 +90,21 @@ struct ContentView: View {
     
     private var authenticatedView: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                searchBar
-                notesList
+            ZStack {
+                VStack(spacing: 0) {
+                    searchBar
+                    notesList
+                }
+                
+                if !notes.isEmpty {
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            floatingActionButtons
+                        }
+                    }
+                }
             }
             .navigationTitle("Qnote")
             .navigationBarTitleDisplayMode(.large)
@@ -100,10 +112,8 @@ struct ContentView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     userProfileButton
                 }
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    pasteButton
+                ToolbarItem(placement: .navigationBarTrailing) {
                     refreshButton
-                    addButton
                 }
             }
             .background(backgroundColor)
@@ -211,82 +221,138 @@ struct ContentView: View {
             if notes.isEmpty {
                 emptyNotesView
             } else {
-                List {
-                    ForEach(isSearching ? searchResults : filteredNotes) { note in
-                        NavigationLink(value: note) {
-                            NoteRowView(note: note, isRefreshing: isRefreshing)
-                        }
-                        .listRowBackground(backgroundColor)
-                        .swipeActions(edge: .trailing) {
-                            if !note.isPinned {
-                                Button(role: .destructive) {
-                                    noteToDelete = note
-                                    showingDeleteConfirmation = true
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(isSearching ? searchResults : filteredNotes) { note in
+                            NavigationLink(value: note) {
+                                NoteRowView(note: note, isRefreshing: isRefreshing)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .contextMenu {
+                                noteContextMenu(for: note)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                if !note.isPinned {
+                                    Button(role: .destructive) {
+                                        noteToDelete = note
+                                        showingDeleteConfirmation = true
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    .tint(.draculaPink)
                                 }
-                                .tint(.draculaPink)
                             }
+                            .swipeActions(edge: .leading) {
+                                Button(action: {
+                                    togglePin(note)
+                                }) {
+                                    Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
+                                }
+                                .tint(.draculaYellow)
+                            }
+                            .transition(.asymmetric(insertion: .scale.combined(with: .opacity),
+                                                    removal: .scale.combined(with: .opacity)))
                         }
-                        .swipeActions(edge: .leading) {
-                            Button(action: {
-                                togglePin(note)
-                            }) {
-                                Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
-                            }
-                            .tint(.draculaYellow)
+                        
+                        if hasMoreNotes && !isSearching {
+                            ProgressView()
+                                .onAppear {
+                                    loadMoreNotes()
+                                }
+                                .padding()
                         }
                     }
-                    
-                    if hasMoreNotes && !isSearching {
-                        ProgressView()
-                            .onAppear {
-                                loadMoreNotes()
-                            }
-                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: filteredNotes)
                 }
-                .listStyle(PlainListStyle())
+            }
+        }
+    }
+    
+    private func noteContextMenu(for note: Note) -> some View {
+        Group {
+            Button(action: {
+                togglePin(note)
+            }) {
+                Label(note.isPinned ? "Unpin" : "Pin", systemImage: note.isPinned ? "pin.slash" : "pin")
+            }
+            
+            Button(action: {
+                UIPasteboard.general.string = note.content
+            }) {
+                Label("Copy", systemImage: "doc.on.doc")
+            }
+            
+            if !note.isPinned {
+                Button(role: .destructive, action: {
+                    noteToDelete = note
+                    showingDeleteConfirmation = true
+                }) {
+                    Label("Delete", systemImage: "trash")
+                }
             }
         }
     }
     
     private var emptyNotesView: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
+            Spacer()
+            
             Image(systemName: "note.text")
-                .font(.system(size: 60))
+                .font(.system(size: 70))
                 .foregroundColor(.draculaComment)
             
-            Text("No Notes Yet")
-                .font(.system(size: 24, weight: .bold, design: .monospaced))
-                .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-            
-            Text("Tap 'Create New' to add your first note")
-                .font(.system(size: 16, design: .monospaced))
-                .foregroundColor(.draculaComment)
-                .multilineTextAlignment(.center)
-            
-            Button(action: { isAddingNewNote = true }) {
-                Text("Create New Note")
-                    .font(.system(size: 16, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(Color.draculaGreen)
-                    .cornerRadius(8)
+            VStack(spacing: 16) {
+                Text("No Notes Yet")
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+                
+                Text("Start capturing your thoughts and ideas")
+                    .font(.system(size: 18, design: .monospaced))
+                    .foregroundColor(.draculaComment)
+                    .multilineTextAlignment(.center)
             }
-            .padding(.top, 10)
+            
+            VStack(spacing: 16) {
+                Button(action: { isAddingNewNote = true }) {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Create New Note")
+                    }
+                    .font(.system(size: 18, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.draculaGreen)
+                    .cornerRadius(12)
+                }
+                
+                Button(action: checkClipboardAndShowAlert) {
+                    HStack {
+                        Image(systemName: "doc.on.clipboard")
+                        Text("Paste from Clipboard")
+                    }
+                    .font(.system(size: 18, weight: .medium, design: .monospaced))
+                    .foregroundColor(.draculaPurple)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.draculaPurple.opacity(0.1))
+                    .cornerRadius(12)
+                }
+            }
+            .padding(.horizontal, 32)
+            
+            Spacer()
+            
+            Text("Tap '+' to add a new note anytime")
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundColor(.draculaComment)
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backgroundColor)
-    }
-    
-    private var addButton: some View {
-        Button(action: { isAddingNewNote = true }) {
-            Text("Create New")
-                .font(.system(size: 16, weight: .regular, design: .monospaced))
-                .foregroundColor(colorScheme == .dark ? .draculaGreen : .blue)
-        }
     }
     
     private var filteredNotes: [Note] {
@@ -525,11 +591,21 @@ struct ContentView: View {
     }
     
     private func togglePin(_ note: Note) {
-        if let index = notes.firstIndex(where: { $0.id == note.id }) {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            if let index = notes.firstIndex(where: { $0.id == note.id }) {
                 notes[index].isPinned.toggle()
+                
+                // Move the note to the appropriate position
+                let updatedNote = notes.remove(at: index)
+                if updatedNote.isPinned {
+                    notes.insert(updatedNote, at: 0)
+                } else {
+                    let insertIndex = notes.firstIndex(where: { !$0.isPinned }) ?? notes.count
+                    notes.insert(updatedNote, at: insertIndex)
+                }
+                
+                updateNote(notes[notes.firstIndex(where: { $0.id == note.id })!])
             }
-            updateNote(notes[index])
         }
     }
     
@@ -848,14 +924,37 @@ struct ContentView: View {
         }
     }
     
-    private var pasteButton: some View {
-        Button(action: {
-            checkClipboardAndShowAlert()
-        }) {
-            Image(systemName: "doc.on.clipboard")
-                .font(.system(size: 18))
-                .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+    private var floatingActionButtons: some View {
+        HStack(spacing: 0) {
+            Button(action: {
+                checkClipboardAndShowAlert()
+            }) {
+                HStack {
+                    Image(systemName: "doc.on.clipboard")
+                    Text("Paste")
+                }
+                .foregroundColor(.white)
+                .frame(height: 40)
+                .frame(width: 100)
+                .background(Color.draculaPurple)
+            }
+            
+            Button(action: { isAddingNewNote = true }) {
+                HStack {
+                    Image(systemName: "plus")
+                    Text("Create")
+                }
+                .foregroundColor(.white)
+                .frame(height: 40)
+                .frame(width: 100)
+                .background(Color.draculaGreen)
+            }
         }
+        .cornerRadius(20)
+        .shadow(radius: 4)
+        .padding(.trailing, 16)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
     
     private func checkClipboardAndShowAlert() {

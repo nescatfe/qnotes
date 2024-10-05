@@ -315,7 +315,7 @@ struct SettingsView: View {
                 Image(systemName: "trash.fill")
                     .foregroundColor(.red)
                     .frame(width: 30)
-                Text("Delete All Notes")
+                Text("Clear Cache")
                     .foregroundColor(.red)
             }
         }
