@@ -93,6 +93,7 @@ struct ContentView: View {
             ZStack {
                 VStack(spacing: 0) {
                     searchBar
+                        .padding(.top, 8)
                     notesList
                 }
                 
@@ -107,13 +108,13 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Qnote")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    userProfileButton
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    refreshButton
+                    HStack(spacing: 16) {
+                        refreshButton
+                        userProfileButton
+                    }
                 }
             }
             .background(backgroundColor)

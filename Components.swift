@@ -191,6 +191,7 @@ struct SearchBarView: View {
     @Binding var isSearching: Bool
     var performSearch: () -> Void
     var clearSearch: () -> Void
+    @Environment(\.colorScheme) var colorScheme
     
     var body: some View {
         HStack {
@@ -199,24 +200,28 @@ struct SearchBarView: View {
                     .foregroundColor(.gray)
                 TextField("Search notes", text: $searchText)
                     .font(.system(size: 16, weight: .regular, design: .monospaced))
+                    .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+                    .accentColor(.draculaPurple)
+                    .onSubmit(performSearch)
+                
+                if !searchText.isEmpty {
+                    Button(action: clearSearch) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                    }
+                }
             }
             .padding(10)
-            .background(Color(.systemGray6))
-            .cornerRadius(8)
-            .onSubmit(performSearch)
-            
-            if !searchText.isEmpty {
-                Button(action: clearSearch) {
-                    Text("Clear")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundColor(.draculaPurple)
-                }
-                .transition(.opacity)
-                .animation(.easeInOut, value: searchText)
-            }
+            .background(colorScheme == .dark ? Color.draculaBackground.opacity(0.3) : Color(.systemGray6))
+            .cornerRadius(20)
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(Color.draculaPurple.opacity(0.3), lineWidth: 1)
+            )
         }
         .padding(.horizontal)
-        .padding(.top, 8)
-        .padding(.bottom, 4)
+        .padding(.vertical, 8)
+        .background(colorScheme == .dark ? Color.black.opacity(0.2) : Color.white.opacity(0.8))
+        .animation(.easeInOut, value: searchText)
     }
 }
