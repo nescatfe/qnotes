@@ -811,6 +811,8 @@ struct ContentView: View {
             isRefreshing = false
             if success {
                 // Optionally show a success message
+                // Save fetched notes to Core Data
+                self.syncNotesToCoreData(self.notes)
             } else {
                 // Show an error message
             }
@@ -871,6 +873,10 @@ struct ContentView: View {
                     }
                     self.isLoading = false
                     self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+                    
+                    // Save fetched notes to Core Data
+                    self.syncNotesToCoreData(self.notes)
+                    
                     completion(true)
                 }
             }
@@ -892,47 +898,51 @@ struct ContentView: View {
     }
     
     private func syncNotesToCoreData(_ fetchedNotes: [Note]) {
-    // Create a background context
-    let backgroundContext = PersistenceController.shared.container.newBackgroundContext()
-    
-    backgroundContext.performAndWait {
-        // Fetch all existing notes at once
-        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "id IN %@", fetchedNotes.map { $0.id })
+        // Create a background context
+        let backgroundContext = PersistenceController.shared.container.newBackgroundContext()
         
-        do {
-            let existingNotes = try backgroundContext.fetch(fetchRequest)
-            let existingNoteDict = Dictionary(uniqueKeysWithValues: existingNotes.map { ($0.id!, $0) })
+        backgroundContext.performAndWait {
+            // Fetch all existing notes at once
+            let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "id IN %@", fetchedNotes.map { $0.id })
             
-            for note in fetchedNotes {
-                if let existingNote = existingNoteDict[note.id] {
-                    // Update existing note
-                    existingNote.content = note.content
-                    existingNote.timestamp = note.timestamp
-                    existingNote.isPinned = note.isPinned
-                    existingNote.userId = note.userId
-                    existingNote.needsSync = false
-                    existingNote.syncStateEnum = note.syncState
-                } else {
-                    // Create new note
-                    let newNote = CDNote(context: backgroundContext)
-                    newNote.id = note.id
-                    newNote.content = note.content
-                    newNote.timestamp = note.timestamp
-                    newNote.isPinned = note.isPinned
-                    newNote.userId = note.userId
-                    newNote.needsSync = false
-                    newNote.syncStateEnum = note.syncState
+            do {
+                let existingNotes = try backgroundContext.fetch(fetchRequest)
+                let existingNoteDict = Dictionary(uniqueKeysWithValues: existingNotes.map { ($0.id!, $0) })
+                
+                for note in fetchedNotes {
+                    if let existingNote = existingNoteDict[note.id] {
+                        // Update existing note
+                        existingNote.content = note.content
+                        existingNote.timestamp = note.timestamp
+                        existingNote.isPinned = note.isPinned
+                        existingNote.userId = note.userId
+                        existingNote.needsSync = false
+                        existingNote.syncStateEnum = note.syncState
+                        existingNote.isPublic = note.isPublic
+                        existingNote.publicId = note.publicId
+                    } else {
+                        // Create new note
+                        let newNote = CDNote(context: backgroundContext)
+                        newNote.id = note.id
+                        newNote.content = note.content
+                        newNote.timestamp = note.timestamp
+                        newNote.isPinned = note.isPinned
+                        newNote.userId = note.userId
+                        newNote.needsSync = false
+                        newNote.syncStateEnum = note.syncState
+                        newNote.isPublic = note.isPublic
+                        newNote.publicId = note.publicId
+                    }
                 }
+                
+                // Save changes
+                try backgroundContext.save()
+            } catch {
+                print("Error syncing notes to Core Data: \(error)")
             }
-            
-            // Save changes
-            try backgroundContext.save()
-        } catch {
-            print("Error syncing notes to Core Data: \(error)")
         }
     }
-}
     
     private func syncNote(_ note: Note) {
         guard note.content.count <= 800000 else {
@@ -1200,7 +1210,7 @@ struct ContentView: View {
     
     private func copyPublicLink(for note: Note) {
         guard let publicId = note.publicId else { return }
-        let link = "https://quicknot.vercel.app/p/\(publicId)"
+        let link = "https://qnote.malvi.lol/p/\(publicId)"
         UIPasteboard.general.string = link
         
         withAnimation(.easeInOut(duration: 0.3)) {
