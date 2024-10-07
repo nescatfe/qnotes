@@ -47,6 +47,8 @@ struct Note: Identifiable, Equatable, Hashable {
     var userId: String
     var syncState: SyncState = .notSynced
     var needsSync: Bool = true
+    var isPublic: Bool = false
+    var publicId: String?
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -60,7 +62,9 @@ extension CDNote {
              timestamp: self.timestamp ?? Date(),
              isPinned: self.isPinned,
              userId: self.userId ?? "",
-             syncState: self.syncStateEnum)
+             syncState: self.syncStateEnum,
+             isPublic: self.isPublic,
+             publicId: self.publicId)
     }
 }
 
@@ -83,6 +87,9 @@ struct NoteRowView: View {
                 syncStatusView
                 if note.isPinned {
                     pinnedIndicator
+                }
+                if note.isPublic {
+                    publicIndicator
                 }
                 Spacer()
             }
@@ -139,6 +146,12 @@ struct NoteRowView: View {
     
     private func formatDate(_ date: Date) -> String {
         DateFormatter.noteListFormatter.string(from: date)
+    }
+    
+    private var publicIndicator: some View {
+        Image(systemName: "globe")
+            .font(.system(size: 12))
+            .foregroundColor(.draculaGreen)
     }
 }
 
@@ -225,3 +238,4 @@ struct SearchBarView: View {
         .animation(.easeInOut, value: searchText)
     }
 }
+

@@ -1,7 +1,17 @@
+//
+//  CDNote+CoreDataProperties.swift
+//  Qnote
+//
+//  Created by coolskyz on 07/10/24.
+//
+//
+
 import Foundation
 import CoreData
 
+
 extension CDNote {
+
     @nonobjc public class func fetchRequest() -> NSFetchRequest<CDNote> {
         return NSFetchRequest<CDNote>(entityName: "CDNote")
     }
@@ -9,12 +19,15 @@ extension CDNote {
     @NSManaged public var content: String?
     @NSManaged public var id: String?
     @NSManaged public var isPinned: Bool
+    @NSManaged public var isSynced: Bool
     @NSManaged public var needsSync: Bool
+    @NSManaged public var syncState: Int16
     @NSManaged public var timestamp: Date?
     @NSManaged public var userId: String?
-    @NSManaged public var syncState: Int16
+    @NSManaged public var isPublic: Bool
+    @NSManaged public var publicId: String?
 
-    var syncStateEnum: SyncState {
+var syncStateEnum: SyncState {
         get {
             return SyncState(rawValue: Int(syncState)) ?? .notSynced
         }

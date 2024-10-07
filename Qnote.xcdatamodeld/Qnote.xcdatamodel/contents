@@ -4,8 +4,10 @@
         <attribute name="content" optional="YES" attributeType="String"/>
         <attribute name="id" optional="YES" attributeType="String"/>
         <attribute name="isPinned" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="isPublic" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
         <attribute name="isSynced" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
         <attribute name="needsSync" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
+        <attribute name="publicId" optional="YES" attributeType="String"/>
         <attribute name="syncState" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="timestamp" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="userId" optional="YES" attributeType="String"/>

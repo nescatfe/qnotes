@@ -68,11 +68,85 @@ struct ContentView: View {
     @State private var clipboardContent: String = ""
     @State private var showingErrorAlert = false
     @State private var errorMessage = ""
+    @State private var showCopiedNotification = false
     
     var body: some View {
         Group {
             if authManager.isAuthenticated {
-                authenticatedView
+                NavigationStack {
+                    ZStack {
+                        VStack(spacing: 0) {
+                            searchBar
+                                .padding(.top, 8)
+                            notesList
+                        }
+                        
+                        if !notes.isEmpty {
+                            VStack {
+                                Spacer()
+                                HStack {
+                                    Spacer()
+                                    floatingActionButtons
+                                }
+                            }
+                        }
+                        
+                        if showCopiedNotification {
+                            copiedNotificationView
+                        }
+                    }
+                    .navigationTitle("Qnote")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            HStack(spacing: 16) {
+                                refreshButton
+                                userProfileButton
+                            }
+                        }
+                    }
+                    .background(backgroundColor)
+                    .navigationDestination(isPresented: $isAddingNewNote) {
+                        NoteEditView(authManager: authManager, mode: .add) { newNote in
+                            addNote(newNote)
+                        }
+                    }
+                    .navigationDestination(for: Note.self) { note in
+                        NoteDetailView(note: note, onSave: updateNote)
+                    }
+                    .alert(isPresented: $showingPasteAlert) {
+                        Alert(
+                            title: Text("Create Note from Clipboard"),
+                            message: Text("Do you want to create a new note from the clipboard content?"),
+                            primaryButton: .default(Text("Create")) {
+                                createNoteFromClipboard()
+                            },
+                            secondaryButton: .cancel()
+                        )
+                    }
+                    .alert("Error", isPresented: $showingErrorAlert, actions: {
+                        Button("OK", role: .cancel) {}
+                    }, message: {
+                        Text(errorMessage)
+                    })
+                }
+                .environment(\.font, .system(.body, design: .monospaced))
+                .tint(colorScheme == .dark ? .draculaForeground : .primary)
+                .onAppear(perform: onAuthenticatedAppear)
+                .alert(isPresented: $showingDeleteConfirmation, content: deleteConfirmationAlert)
+                .confirmationDialog("Are you sure you want to log out?", isPresented: $showingLogoutConfirmation, titleVisibility: .visible) {
+                    Button("Log Out", role: .destructive) {
+                        logout()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
+                .overlay(loggingOutOverlay)
+                .sheet(isPresented: $showingSettings) {
+                    NavigationStack {
+                        SettingsView(showingLogoutConfirmation: $showingLogoutConfirmation, connectivityManager: connectivityManager, notes: $notes)
+                            .environment(\.managedObjectContext, viewContext)
+                    }
+                }
             } else {
                 LoginView()
             }
@@ -105,6 +179,10 @@ struct ContentView: View {
                             floatingActionButtons
                         }
                     }
+                }
+                
+                if showCopiedNotification {
+                    copiedNotificationView
                 }
             }
             .navigationTitle("Qnote")
@@ -281,6 +359,20 @@ struct ContentView: View {
             }
             
             Button(action: {
+                togglePublic(note)
+            }) {
+                Label(note.isPublic ? "Make Private" : "Make Public", systemImage: note.isPublic ? "lock" : "globe")
+            }
+            
+            if note.isPublic {
+                Button(action: {
+                    copyPublicLink(for: note)
+                }) {
+                    Label("Copy Public Link", systemImage: "link")
+                }
+            }
+            
+            Button(action: {
                 UIPasteboard.general.string = note.content
             }) {
                 Label("Copy", systemImage: "doc.on.doc")
@@ -417,36 +509,40 @@ struct ContentView: View {
             .limit(to: notesPerPage * page)
             .getDocuments { (querySnapshot, error) in
                 if let error = error {
-                    print("Error fetching documents: \(error)")
-                    isLoading = false
-                    return
-                }
-                
-                guard let documents = querySnapshot?.documents else {
-                    print("No documents")
-                    isLoading = false
-                    return
-                }
-                
-                let fetchedNotes = documents.compactMap { document -> Note? in
-                    let data = document.data()
-                    guard let content = data["content"] as? String,
-                          let timestamp = (data["timestamp"] as? Timestamp)?.dateValue(),
-                          let isPinned = data["isPinned"] as? Bool else {
-                        return nil
-                    }
-                    return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId, syncState: .synced)
-                }
-                
-                DispatchQueue.main.async {
-                    if page == 1 {
-                        self.notes = fetchedNotes
-                    } else {
-                        self.notes.append(contentsOf: fetchedNotes)
-                    }
-                    self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+                    print("Error fetching notes: \(error)")
+                    self.errorMessage = "Failed to fetch notes: \(error.localizedDescription)"
+                    self.showingErrorAlert = true
                     self.isLoading = false
-                    self.syncNotesToCoreData(fetchedNotes)
+                } else {
+                    let fetchedNotes = querySnapshot?.documents.compactMap { document -> Note? in
+                        let data = document.data()
+                        let id = document.documentID
+                        let content = data["content"] as? String ?? ""
+                        let timestamp = (data["timestamp"] as? Timestamp)?.dateValue() ?? Date()
+                        let isPinned = data["isPinned"] as? Bool ?? false
+                        let isPublic = data["isPublic"] as? Bool ?? false
+                        let publicId = data["publicId"] as? String
+                        
+                        return Note(id: id,
+                                    content: content,
+                                    timestamp: timestamp,
+                                    isPinned: isPinned,
+                                    userId: userId,
+                                    syncState: .synced,
+                                    needsSync: false,
+                                    isPublic: isPublic,
+                                    publicId: publicId)
+                    } ?? []
+                    
+                    DispatchQueue.main.async {
+                        if page == 1 {
+                            self.notes = fetchedNotes
+                        } else {
+                            self.notes.append(contentsOf: fetchedNotes)
+                        }
+                        self.isLoading = false
+                        self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+                    }
                 }
             }
     }
@@ -490,17 +586,23 @@ struct ContentView: View {
         }
     }
     
-    private func updateNote(_ updatedNote: Note) {
-        if let index = notes.firstIndex(where: { $0.id == updatedNote.id }) {
-            notes[index] = updatedNote
-            saveNoteToCoreData(updatedNote)
-            if updatedNote.content.count <= 800000 {
-                syncNote(updatedNote)
-            } else {
-                print("Updated note exceeds 800,000 characters. Keeping it local only.")
-                notes[index].syncState = .notSynced
-                notes[index].needsSync = false
-                updateNoteInCoreData(notes[index])
+    private func updateNote(_ note: Note) {
+        if let index = notes.firstIndex(where: { $0.id == note.id }) {
+            notes[index] = note
+        }
+        
+        saveNoteToCoreData(note)
+        
+        if connectivityManager.isConnected {
+            uploadNoteToFirebase(note) { success in
+                if success {
+                    DispatchQueue.main.async {
+                        if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+                            self.notes[index].syncState = .synced
+                            self.notes[index].needsSync = false
+                        }
+                    }
+                }
             }
         }
     }
@@ -533,6 +635,11 @@ struct ContentView: View {
             deletedNoteIds.insert("\(userId):\(note.id)")
             UserDefaults.standard.setDeletedNoteIds(deletedNoteIds)
         }
+        
+        // If the note is public, delete it from the public notes collection
+        if note.isPublic, let publicId = note.publicId {
+            deletePublicNote(publicId: publicId)
+        }
     }
     
     private func deleteNoteFromFirebase(_ note: Note) {
@@ -545,6 +652,15 @@ struct ContentView: View {
                 // Remove from deletedNoteIds if successfully deleted
                 deletedNoteIds.remove("\(userId):\(note.id)")
                 UserDefaults.standard.setDeletedNoteIds(deletedNoteIds)
+            }
+        }
+    }
+    
+    private func deletePublicNote(publicId: String) {
+        let db = Firestore.firestore()
+        db.collection("public_notes").document(publicId).delete { error in
+            if let error = error {
+                print("Error deleting public note: \(error.localizedDescription)")
             }
         }
     }
@@ -733,7 +849,18 @@ struct ContentView: View {
                           let isPinned = data["isPinned"] as? Bool else {
                         return nil
                     }
-                    return Note(id: document.documentID, content: content, timestamp: timestamp, isPinned: isPinned, userId: userId, syncState: .synced)
+                    let isPublic = data["isPublic"] as? Bool ?? false
+                    let publicId = data["publicId"] as? String
+                    
+                    return Note(id: document.documentID,
+                                content: content,
+                                timestamp: timestamp,
+                                isPinned: isPinned,
+                                userId: userId,
+                                syncState: .synced,
+                                needsSync: false,
+                                isPublic: isPublic,
+                                publicId: publicId)
                 }
                 
                 DispatchQueue.main.async {
@@ -742,8 +869,8 @@ struct ContentView: View {
                     } else {
                         self.notes.append(contentsOf: fetchedNotes)
                     }
+                    self.isLoading = false
                     self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
-                    self.syncNotesToCoreData(fetchedNotes)
                     completion(true)
                 }
             }
@@ -891,6 +1018,8 @@ struct ContentView: View {
             cdNote.userId = note.userId
             cdNote.needsSync = true
             cdNote.syncStateEnum = .notSynced
+            cdNote.isPublic = note.isPublic
+            cdNote.publicId = note.publicId
             
             try viewContext.save()
         } catch {
@@ -909,13 +1038,18 @@ struct ContentView: View {
         let db = Firestore.firestore()
         let noteRef = db.collection("users").document(userId).collection("notes").document(note.id)
         
-        let data: [String: Any] = [
+        var data: [String: Any] = [
             "content": note.content,
             "timestamp": note.timestamp,
-            "isPinned": note.isPinned
+            "isPinned": note.isPinned,
+            "isPublic": note.isPublic
         ]
         
-        noteRef.setData(data) { error in
+        if let publicId = note.publicId {
+            data["publicId"] = publicId
+        }
+        
+        noteRef.setData(data, merge: true) { error in
             if let error = error {
                 print("Error uploading note: \(error)")
                 completion(false)
@@ -1007,5 +1141,99 @@ struct ContentView: View {
         } catch {
             print("Error cleaning up deleted notes: \(error)")
         }
+    }
+    
+    private func togglePublic(_ note: Note) {
+        if let index = notes.firstIndex(where: { $0.id == note.id }) {
+            notes[index].isPublic.toggle()
+            if notes[index].isPublic {
+                makeNotePublic(notes[index])
+            } else {
+                makeNotePrivate(notes[index])
+            }
+        }
+    }
+    
+    private func makeNotePublic(_ note: Note) {
+        let publicId = generateShortId()
+        let publicNoteRef = Firestore.firestore().collection("public_notes").document(publicId)
+        
+        publicNoteRef.setData([
+            "content": note.content,
+            "timestamp": Timestamp(date: note.timestamp),
+            "userId": note.userId,
+            "publicId": publicId
+        ]) { error in
+            if let error = error {
+                print("Error making note public: \(error.localizedDescription)")
+            } else {
+                DispatchQueue.main.async {
+                    if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+                        self.notes[index].isPublic = true
+                        self.notes[index].publicId = publicId
+                        self.updateNote(self.notes[index])
+                    }
+                }
+            }
+        }
+    }
+    
+    private func makeNotePrivate(_ note: Note) {
+        guard let publicId = note.publicId else { return }
+        
+        let publicNoteRef = Firestore.firestore().collection("public_notes").document(publicId)
+        
+        publicNoteRef.delete { error in
+            if let error = error {
+                print("Error making note private: \(error)")
+            } else {
+                DispatchQueue.main.async {
+                    if let index = self.notes.firstIndex(where: { $0.id == note.id }) {
+                        self.notes[index].isPublic = false
+                        self.notes[index].publicId = nil
+                        self.updateNote(self.notes[index])
+                    }
+                }
+            }
+        }
+    }
+    
+    private func copyPublicLink(for note: Note) {
+        guard let publicId = note.publicId else { return }
+        let link = "https://quicknot.vercel.app/p/\(publicId)"
+        UIPasteboard.general.string = link
+        
+        withAnimation(.easeInOut(duration: 0.3)) {
+            showCopiedNotification = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showCopiedNotification = false
+            }
+        }
+    }
+    
+    private func generateShortId() -> String {
+        let characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        return String((0..<8).map { _ in characters.randomElement()! })
+    }
+    
+    private var copiedNotificationView: some View {
+        VStack {
+            Spacer()
+            Text("Link copied to clipboard")
+                .font(.system(size: 16, weight: .medium, design: .monospaced))
+                .foregroundColor(.white)
+                .padding()
+                .background(Color.draculaGreen.opacity(0.8))
+                .cornerRadius(10)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.4))
+        .edgesIgnoringSafeArea(.all)
+        .transition(.opacity)
+        .zIndex(1)
     }
 }

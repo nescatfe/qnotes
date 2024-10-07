@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import UIKit
+import FirebaseFirestore
 
 struct NoteDetailView: View {
     @Environment(\.colorScheme) var colorScheme
@@ -14,6 +15,11 @@ struct NoteDetailView: View {
     @State private var animateContent = false
     @State private var showingUnsavedChangesAlert = false
     @State private var showingInfoAlert = false
+    @State private var shareButtonText = "Share"
+    @State private var copyLinkText = "Copy Link"
+    @State private var showMenu = false
+    @State private var showPublicLinkCopiedNotification = false
+    @State private var showContentCopiedNotification = false
     
     let onSave: (Note) -> Void
     
@@ -43,7 +49,6 @@ struct NoteDetailView: View {
                         self.editedContent = updatedNote.content
                         self.onSave(updatedNote)
                         self.isEditing = false
-                        // No need to call loadNoteContent() here as we're staying on the same view
                     }
                 } else {
                     noteContentView
@@ -57,8 +62,37 @@ struct NoteDetailView: View {
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if !isEditing {
-                        editButton
-                        copyButton
+                        Menu {
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    isEditing = true
+                                }
+                            }) {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            
+                            Button(action: copyNoteContent) {
+                                Label("Copy", systemImage: "doc.on.doc")
+                            }
+                            
+                            if note.isPublic {
+                                Button(action: handleMakePrivate) {
+                                    Label("Make Private", systemImage: "lock")
+                                }
+                                
+                                Button(action: copyPublicLink) {
+                                    Label("Copy Link", systemImage: "link")
+                                }
+                            } else {
+                                Button(action: handleShare) {
+                                    Label(note.isPublic ? "Copy Public Link" : "Share", systemImage: note.isPublic ? "doc.on.doc" : "square.and.arrow.up")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 16, weight: .regular))
+                                .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
+                        }
                     }
                 }
             }
@@ -71,8 +105,12 @@ struct NoteDetailView: View {
                 loadNoteContent()
             }
             
-            if showCopiedNotification {
-                copiedNotificationView
+            if showPublicLinkCopiedNotification {
+                publicLinkCopiedNotificationView
+            }
+            
+            if showContentCopiedNotification {
+                contentCopiedNotificationView
             }
         }
         .onChange(of: note) { _, _ in
@@ -108,39 +146,28 @@ struct NoteDetailView: View {
         .offset(y: animateContent ? 0 : 20)
     }
     
-    private var editButton: some View {
-        Button(action: {
-            withAnimation(.easeInOut(duration: 0.3)) {
-                isEditing = true
-            }
-        }) {
-            Text("Edit")
-                .font(.system(size: 16, weight: .regular, design: .monospaced))
-                .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
-        }
+    private var publicLinkCopiedNotificationView: some View {
+        notificationView(text: "Public link copied to clipboard")
     }
     
-    private var copyButton: some View {
-        Button(action: {
-            copyNoteContent()
-        }) {
-            Text("Copy")
-                .font(.system(size: 16, weight: .regular, design: .monospaced))
-                .foregroundColor(colorScheme == .dark ? .draculaPurple : .draculaPurple)
-        }
+    private var contentCopiedNotificationView: some View {
+        notificationView(text: "Note content copied to clipboard")
     }
     
-    private var copiedNotificationView: some View {
+    private func notificationView(text: String) -> some View {
         VStack {
             Spacer()
-            Text("All Content Copied")
+            Text(text)
                 .font(.system(size: 16, weight: .medium, design: .monospaced))
+                .foregroundColor(.white)
                 .padding()
-                .background(Color.draculaGreen)
-                .foregroundColor(.draculaBackground)
+                .background(Color.draculaGreen.opacity(0.8))
                 .cornerRadius(10)
             Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.4))
+        .edgesIgnoringSafeArea(.all)
         .transition(.opacity)
         .zIndex(1)
     }
@@ -189,6 +216,8 @@ struct NoteDetailView: View {
         if note.content != editedContent {
             note.content = editedContent
             note.timestamp = Date()
+            note.isPublic = note.isPublic // Preserve the public status
+            note.publicId = note.publicId // Preserve the public ID
             onSave(note)
             
             // Update the local note state
@@ -199,7 +228,6 @@ struct NoteDetailView: View {
             withAnimation {
                 isEditing = false
                 isSaving = false
-                // No need to call loadNoteContent() here as we're staying on the same view
             }
         }
     }
@@ -226,12 +254,101 @@ struct NoteDetailView: View {
         UIPasteboard.general.string = note.content
         
         withAnimation(.easeInOut(duration: 0.3)) {
-            showCopiedNotification = true
+            showContentCopiedNotification = true
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             withAnimation(.easeInOut(duration: 0.3)) {
-                showCopiedNotification = false
+                showContentCopiedNotification = false
+            }
+        }
+    }
+    
+    private func handleShare() {
+        isSaving = true
+        shareButtonText = "Sharing..."
+        
+        let publicId = generateShortId()
+        let publicNoteRef = Firestore.firestore().collection("public_notes").document(publicId)
+        
+        publicNoteRef.setData([
+            "content": note.content,
+            "timestamp": Timestamp(date: note.timestamp),
+            "userId": note.userId,
+            "publicId": publicId
+        ]) { error in
+            DispatchQueue.main.async {
+                self.isSaving = false
+                if let error = error {
+                    print("Error sharing note: \(error.localizedDescription)")
+                    self.shareButtonText = "Share Failed"
+                } else {
+                    self.note.isPublic = true
+                    self.note.publicId = publicId
+                    self.onSave(self.note)  // Make sure this updates the note in Firestore as well
+                    self.shareButtonText = "Shared"
+                    
+                    // Create the public note URL
+                    let publicNoteURL = "https://quicknot.vercel.app/p/\(publicId)" // Replace with your actual URL scheme
+                    
+                    // Copy the URL to clipboard
+                    UIPasteboard.general.string = publicNoteURL
+                    
+                    // Show a notification that the link has been copied
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        self.showPublicLinkCopiedNotification = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            self.showPublicLinkCopiedNotification = false
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func handleMakePrivate() {
+        guard let publicId = note.publicId else { return }
+        
+        isSaving = true
+        shareButtonText = "Making Private..."
+        
+        let publicNoteRef = Firestore.firestore().collection("public_notes").document(publicId)
+        
+        publicNoteRef.delete { error in
+            DispatchQueue.main.async {
+                self.isSaving = false
+                if let error = error {
+                    print("Error making note private: \(error)")
+                    self.shareButtonText = "Make Private Failed"
+                } else {
+                    self.note.isPublic = false
+                    self.note.publicId = nil
+                    self.onSave(self.note)  // Make sure this updates the note in Firestore as well
+                    self.shareButtonText = "Share"
+                }
+            }
+        }
+    }
+    
+    private func generateShortId() -> String {
+        let characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        return String((0..<8).map { _ in characters.randomElement()! })
+    }
+    
+    private func copyPublicLink() {
+        guard let publicId = note.publicId else { return }
+        let link = "https://quicknot.vercel.app/p/\(publicId)"
+        UIPasteboard.general.string = link
+        
+        withAnimation(.easeInOut(duration: 0.3)) {
+            showPublicLinkCopiedNotification = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showPublicLinkCopiedNotification = false
             }
         }
     }

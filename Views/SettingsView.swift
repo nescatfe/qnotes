@@ -236,6 +236,11 @@ struct SettingsView: View {
             let notesToDelete = try viewContext.fetch(fetchRequest)
             for note in notesToDelete {
                 viewContext.delete(note)
+                
+                // If the note is public, delete it from the public notes collection
+                if note.isPublic, let publicId = note.publicId {
+                    deletePublicNote(publicId: publicId)
+                }
             }
             try viewContext.save()
             
@@ -266,11 +271,25 @@ struct SettingsView: View {
                 print("Error getting documents: \(error)")
             } else {
                 for document in querySnapshot!.documents {
+                    let data = document.data()
+                    if let isPublic = data["isPublic"] as? Bool, isPublic,
+                       let publicId = data["publicId"] as? String {
+                        self.deletePublicNote(publicId: publicId)
+                    }
                     document.reference.delete()
                 }
             }
             // Clear the flag for future deletion
             UserDefaults.standard.set(false, forKey: "unpinnedNotesNeedDeletion")
+        }
+    }
+    
+    private func deletePublicNote(publicId: String) {
+        let db = Firestore.firestore()
+        db.collection("public_notes").document(publicId).delete { error in
+            if let error = error {
+                print("Error deleting public note: \(error.localizedDescription)")
+            }
         }
     }
     
