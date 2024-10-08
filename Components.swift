@@ -74,45 +74,47 @@ struct NoteRowView: View {
     let isRefreshing: Bool
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(note.content.prefix(100).trimmingCharacters(in: .whitespacesAndNewlines))
-                .lineLimit(2)
-                .font(.system(size: 16, weight: .regular, design: .monospaced))
-                .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
-            
-            HStack(spacing: 8) {
-                Text(formatDate(note.timestamp))
-                    .font(.system(size: 12, weight: .regular, design: .monospaced))
-                    .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
-                syncStatusView
-                if note.isPinned {
-                    pinnedIndicator
-                }
-                if note.isPublic {
-                    publicIndicator
-                }
-                Spacer()
+        HStack(spacing: 0) {
+            if note.isPinned {
+                Rectangle()
+                    .fill(Color.draculaOrange)
+                    .frame(width: 4)
             }
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text(note.content.prefix(100).trimmingCharacters(in: .whitespacesAndNewlines))
+                    .lineLimit(2)
+                    .font(.system(size: 16, weight: .regular, design: .monospaced))
+                    .foregroundColor(colorScheme == .dark ? .draculaForeground : .primary)
+                
+                HStack(spacing: 8) {
+                    Text(formatDate(note.timestamp))
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
+                    syncStatusView
+                    if note.isPinned {
+                        pinnedIndicator
+                    }
+                    if note.isPublic {
+                        publicIndicator
+                    }
+                    Spacer()
+                }
+            }
+            .padding(16)
         }
-        .padding(16)
         .background(noteBackground)
         .cornerRadius(12)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(note.isPinned ? pinnedBorderColor : Color.gray.opacity(0.2), lineWidth: note.isPinned ? 2 : 1)
+                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 2)
     }
     
     private var noteBackground: some View {
         RoundedRectangle(cornerRadius: 12)
-            .fill(note.isPinned ? 
-                  (colorScheme == .dark ? Color.draculaBackground.opacity(0.3) : Color.draculaOrange.opacity(0.1)) : 
-                  (colorScheme == .dark ? Color.draculaBackground.opacity(0.1) : Color.white))
-    }
-    
-    private var pinnedBorderColor: Color {
-        colorScheme == .dark ? .draculaOrange : .draculaOrange.opacity(0.6)
+            .fill(colorScheme == .dark ? Color.draculaBackground.opacity(0.1) : Color.white)
     }
     
     private var pinnedIndicator: some View {
@@ -238,4 +240,3 @@ struct SearchBarView: View {
         .animation(.easeInOut, value: searchText)
     }
 }
-
