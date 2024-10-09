@@ -49,6 +49,7 @@ struct Note: Identifiable, Equatable, Hashable {
     var needsSync: Bool = true
     var isPublic: Bool = false
     var publicId: String?
+    var size: Int { content.utf8.count }  // Add this line
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -99,6 +100,7 @@ struct NoteRowView: View {
                         publicIndicator
                     }
                     Spacer()
+                    // Remove the size display from here
                 }
             }
             .padding(16)

@@ -302,7 +302,7 @@ struct ContentView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(isSearching ? searchResults : filteredNotes) { note in
+                        ForEach(isSearching ? searchResults : filteredNotes, id: \.id) { note in
                             NavigationLink(value: note) {
                                 NoteRowView(note: note, isRefreshing: isRefreshing)
                                     .contentShape(Rectangle())
@@ -330,8 +330,6 @@ struct ContentView: View {
                                 }
                                 .tint(.draculaYellow)
                             }
-                            .transition(.asymmetric(insertion: .scale.combined(with: .opacity),
-                                                    removal: .scale.combined(with: .opacity)))
                         }
                         
                         if hasMoreNotes && !isSearching {
@@ -344,7 +342,6 @@ struct ContentView: View {
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: filteredNotes)
                 }
             }
         }

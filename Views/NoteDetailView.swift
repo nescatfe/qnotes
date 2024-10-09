@@ -33,6 +33,10 @@ struct NoteDetailView: View {
         colorScheme == .dark ? Color(red: 20/255, green: 21/255, blue: 28/255) : Color.white
     }
     
+    private var noteSize: Int {
+        note.content.utf8.count
+    }
+    
     var body: some View {
         ZStack {
             backgroundColor.ignoresSafeArea()
@@ -133,7 +137,7 @@ struct NoteDetailView: View {
                 
                 Spacer()
                 
-                Text("\(wordCount)w / \(note.content.count)c")
+                Text("\(wordCount)w / \(note.content.count)c / \(formatSize(noteSize))")
                     .font(.system(size: 12, weight: .regular, design: .monospaced))
                     .foregroundColor(colorScheme == .dark ? .draculaComment : .gray)
             }
@@ -351,6 +355,13 @@ struct NoteDetailView: View {
                 showPublicLinkCopiedNotification = false
             }
         }
+    }
+    
+    private func formatSize(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
     }
 }
 
