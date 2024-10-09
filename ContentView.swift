@@ -576,7 +576,7 @@ struct ContentView: View {
     private func addNote(_ note: Note) {
         notes.insert(note, at: 0)
         saveNoteToCoreData(note)
-        if note.content.count <= 800000 {
+        if note.content.count <= 460000 {
             syncNote(note)
         } else {
             print("New note exceeds 800,000 characters. Keeping it local only.")
@@ -942,7 +942,7 @@ struct ContentView: View {
     }
     
     private func syncNote(_ note: Note) {
-        guard note.content.count <= 800000 else {
+        guard note.content.count <= 460000 else {
             print("Note exceeds 800,000 characters. Keeping it local only.")
             if let index = notes.firstIndex(where: { $0.id == note.id }) {
                 notes[index].syncState = .notSynced
@@ -979,7 +979,7 @@ struct ContentView: View {
     private func markNoteForSync(_ note: Note) {
         if let index = notes.firstIndex(where: { $0.id == note.id }) {
             notes[index].syncState = .notSynced
-            notes[index].needsSync = note.content.count <= 800000 // Only mark for sync if within character limit
+            notes[index].needsSync = note.content.count <= 460000 // Only mark for sync if within character limit
             updateNoteInCoreData(notes[index])
         }
     }
