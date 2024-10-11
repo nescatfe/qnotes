@@ -60,9 +60,6 @@ struct ContentView: View {
     @State private var userProfileImageURL: URL?
     @State private var isCreatingNoteFromClipboard = false
     @State private var isLoading = false
-    @State private var currentPage = 1
-    @State private var hasMoreNotes = true
-    private let notesPerPage = 20
     @State private var isUploading = false
     @State private var showingPasteAlert = false
     @State private var clipboardContent: String = ""
@@ -241,8 +238,8 @@ struct ContentView: View {
     
     private func onAuthenticatedAppear() {
         setNavigationBarFont()
-        cleanupDeletedNotes() // Add this line
-        fetchNotes()
+        cleanupDeletedNotes()
+        fetchAllNotes()
         withAnimation(.easeOut(duration: 0.3)) {
             animateList = true
         }
@@ -330,14 +327,6 @@ struct ContentView: View {
                                 }
                                 .tint(.draculaYellow)
                             }
-                        }
-                        
-                        if hasMoreNotes && !isSearching {
-                            ProgressView()
-                                .onAppear {
-                                    loadMoreNotes()
-                                }
-                                .padding()
                         }
                     }
                     .padding(.horizontal)
@@ -454,56 +443,27 @@ struct ContentView: View {
         }
     }
     
-    private func fetchNotes() {
+    private func fetchAllNotes() {
         isLoading = true
-        currentPage = 1
-        hasMoreNotes = true
-        
-        let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
-        fetchRequest.predicate = NSPredicate(format: "userId == %@", authManager.user?.uid ?? "")
-        fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \CDNote.timestamp, ascending: false)]
-        fetchRequest.fetchLimit = notesPerPage
-        
-        do {
-            let fetchedCDNotes = try viewContext.fetch(fetchRequest)
-            let fetchedNotes = fetchedCDNotes.map { $0.toNote() }
-            
-            DispatchQueue.main.async {
-                self.notes = fetchedNotes
-                self.isLoading = false
-                self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
-            }
-        } catch {
-            print("Error fetching notes: \(error)")
-            DispatchQueue.main.async {
-                self.isLoading = false
-                self.errorMessage = "Failed to fetch notes: \(error.localizedDescription)"
-                self.showingErrorAlert = true
-            }
-        }
-    }
-    
-    private func loadMoreNotes() {
-        guard !isLoading && hasMoreNotes else { return }
-        currentPage += 1
         
         if connectivityManager.isConnected {
-            fetchNotesFromFirebase(page: currentPage)
+            fetchAllNotesFromFirebase()
         } else {
-            fetchNotesFromCoreData(page: currentPage)
+            fetchAllNotesFromCoreData()
         }
     }
     
-    private func fetchNotesFromFirebase(page: Int) {
-        guard let userId = authManager.user?.uid else { return }
-        isLoading = true
+    private func fetchAllNotesFromFirebase() {
+        guard let userId = authManager.user?.uid else {
+            isLoading = false
+            return
+        }
         
         let db = Firestore.firestore()
         let notesRef = db.collection("users").document(userId).collection("notes")
         
         notesRef
             .order(by: "timestamp", descending: true)
-            .limit(to: notesPerPage * page)
             .getDocuments { (querySnapshot, error) in
                 if let error = error {
                     print("Error fetching notes: \(error)")
@@ -532,44 +492,37 @@ struct ContentView: View {
                     } ?? []
                     
                     DispatchQueue.main.async {
-                        if page == 1 {
-                            self.notes = fetchedNotes
-                        } else {
-                            self.notes.append(contentsOf: fetchedNotes)
-                        }
+                        self.notes = fetchedNotes
                         self.isLoading = false
-                        self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+                        self.syncNotesToCoreData(self.notes)
                     }
                 }
             }
     }
     
-    private func fetchNotesFromCoreData(page: Int) {
-        guard let userId = authManager.user?.uid else { return }
-        isLoading = true
+    private func fetchAllNotesFromCoreData() {
+        guard let userId = authManager.user?.uid else {
+            isLoading = false
+            return
+        }
         
         let fetchRequest: NSFetchRequest<CDNote> = CDNote.fetchRequest()
         fetchRequest.predicate = NSPredicate(format: "userId == %@", userId)
         fetchRequest.sortDescriptors = [NSSortDescriptor(keyPath: \CDNote.timestamp, ascending: false)]
-        fetchRequest.fetchLimit = notesPerPage
-        fetchRequest.fetchOffset = (page - 1) * notesPerPage
         
         do {
             let cdNotes = try viewContext.fetch(fetchRequest)
             let fetchedNotes = cdNotes.map { $0.toNote() }
             
             DispatchQueue.main.async {
-                if page == 1 {
-                    self.notes = fetchedNotes
-                } else {
-                    self.notes.append(contentsOf: fetchedNotes)
-                }
-                self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
+                self.notes = fetchedNotes
                 self.isLoading = false
             }
         } catch {
             print("Error fetching notes from Core Data: \(error)")
             isLoading = false
+            errorMessage = "Failed to fetch notes: \(error.localizedDescription)"
+            showingErrorAlert = true
         }
     }
     
@@ -785,6 +738,9 @@ struct ContentView: View {
     
     private var refreshButton: some View {
         Button(action: {
+            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                isRefreshing = true
+            }
             refreshNotes()
         }) {
             Image(systemName: "arrow.clockwise")
@@ -792,7 +748,7 @@ struct ContentView: View {
                 .foregroundColor(connectivityManager.isConnected ? 
                     (colorScheme == .dark ? .draculaGreen : .draculaGreen) : .gray)
                 .rotationEffect(Angle(degrees: isRefreshing ? 360 : 0))
-                .animation(isRefreshing ? Animation.linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
+                .animation(isRefreshing ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
         }
         .disabled(!connectivityManager.isConnected || isRefreshing)
     }
@@ -803,80 +759,14 @@ struct ContentView: View {
             return
         }
         
-        isRefreshing = true
-        fetchNotesFromFirebase(page: 1) { success in
-            isRefreshing = false
-            if success {
-                // Optionally show a success message
-                // Save fetched notes to Core Data
-                self.syncNotesToCoreData(self.notes)
-            } else {
-                // Show an error message
+        fetchAllNotesFromFirebase()
+        
+        // Stop the animation after a short delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            withAnimation {
+                isRefreshing = false
             }
         }
-    }
-    
-    private func fetchNotesFromFirebase(page: Int, completion: @escaping (Bool) -> Void) {
-        guard let userId = authManager.user?.uid else {
-            completion(false)
-            return
-        }
-        
-        let db = Firestore.firestore()
-        let notesRef = db.collection("users").document(userId).collection("notes")
-        
-        notesRef
-            .order(by: "timestamp", descending: true)
-            .limit(to: notesPerPage * page)
-            .getDocuments { (querySnapshot, error) in
-                if let error = error {
-                    print("Error fetching documents: \(error)")
-                    completion(false)
-                    return
-                }
-                
-                guard let documents = querySnapshot?.documents else {
-                    print("No documents")
-                    completion(false)
-                    return
-                }
-                
-                let fetchedNotes = documents.compactMap { document -> Note? in
-                    let data = document.data()
-                    guard let content = data["content"] as? String,
-                          let timestamp = (data["timestamp"] as? Timestamp)?.dateValue(),
-                          let isPinned = data["isPinned"] as? Bool else {
-                        return nil
-                    }
-                    let isPublic = data["isPublic"] as? Bool ?? false
-                    let publicId = data["publicId"] as? String
-                    
-                    return Note(id: document.documentID,
-                                content: content,
-                                timestamp: timestamp,
-                                isPinned: isPinned,
-                                userId: userId,
-                                syncState: .synced,
-                                needsSync: false,
-                                isPublic: isPublic,
-                                publicId: publicId)
-                }
-                
-                DispatchQueue.main.async {
-                    if page == 1 {
-                        self.notes = fetchedNotes
-                    } else {
-                        self.notes.append(contentsOf: fetchedNotes)
-                    }
-                    self.isLoading = false
-                    self.hasMoreNotes = fetchedNotes.count == self.notesPerPage
-                    
-                    // Save fetched notes to Core Data
-                    self.syncNotesToCoreData(self.notes)
-                    
-                    completion(true)
-                }
-            }
     }
     
     private func checkForUnpinnedNotesDeletion() {
